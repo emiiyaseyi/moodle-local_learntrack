@@ -6,7 +6,6 @@ $PAGE->set_url(new moodle_url('/local/learnpath/welcome.php'));
 $PAGE->set_context(context_system::instance());
 $PAGE->set_pagelayout('report');
 $PAGE->set_title('LearnTrack — Welcome');
-$PAGE->requires->css('/local/learnpath/styles.css');
 global $DB, $OUTPUT;
 $isadmin = has_capability('local/learnpath:manage', context_system::instance());
 $brand   = get_config('local_learnpath', 'brand_color') ?: '#1e3a5f';

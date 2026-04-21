@@ -20,7 +20,6 @@ $PAGE->set_url(new moodle_url('/local/learnpath/myprofile.php'));
 $PAGE->set_context($ctx);
 $PAGE->set_pagelayout('standard');
 $PAGE->set_title($bname . ' — My Profile');
-$PAGE->requires->css('/local/learnpath/styles.css');
 
 // Collect all paths this learner belongs to
 $all_paths = [];

@@ -53,7 +53,6 @@ $PAGE->set_url(new moodle_url('/local/learnpath/courseinsights.php', ['courseid'
 $PAGE->set_context(context_system::instance());
 $PAGE->set_pagelayout('report');
 $PAGE->set_title('LearnTrack — Course Insights');
-$PAGE->requires->css('/local/learnpath/styles.css');
 
 global $DB, $OUTPUT;
 $brand = get_config('local_learnpath', 'brand_color') ?: '#1e3a5f';

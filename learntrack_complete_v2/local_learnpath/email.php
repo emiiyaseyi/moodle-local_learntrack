@@ -11,7 +11,6 @@ $PAGE->set_url(new moodle_url('/local/learnpath/email.php', ['groupid' => $group
 $PAGE->set_context(context_system::instance());
 $PAGE->set_pagelayout('report');
 $PAGE->set_title('LearnTrack — Send Report');
-$PAGE->requires->css('/local/learnpath/styles.css');
 global $OUTPUT, $USER, $DB;
 $error='';
 if(optional_param('send',0,PARAM_INT)&&confirm_sesskey()){

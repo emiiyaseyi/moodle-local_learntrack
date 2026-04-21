@@ -16,7 +16,6 @@ $PAGE->set_url(new moodle_url('/local/learnpath/overview.php'));
 $PAGE->set_context($ctx);
 $PAGE->set_pagelayout('report');
 $PAGE->set_title('LearnTrack — Overview');
-$PAGE->requires->css('/local/learnpath/styles.css');
 
 global $DB, $OUTPUT, $USER;
 $brand   = get_config('local_learnpath', 'brand_color') ?: '#1e3a5f';

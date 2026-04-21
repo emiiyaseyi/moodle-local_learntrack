@@ -25,7 +25,6 @@ $PAGE->set_context($ctx);
 $PAGE->set_pagelayout('report');
 $PAGE->set_title('LearnTrack — Manage Paths');
 $PAGE->set_heading('LearnTrack');
-$PAGE->requires->css('/local/learnpath/styles.css');
 
 global $DB, $USER, $OUTPUT;
 
@@ -145,10 +144,10 @@ if ($action === 'add' || ($action === 'edit' && $groupid > 0)) {
         } elseif ($data->grouptype === 'category' && !empty($data->categoryid)) {
             $courseids = array_keys($DB->get_records('course', ['category' => (int)$data->categoryid], '', 'id'));
         } elseif ($data->grouptype === 'cohort' && !empty($data->cohortid)) {
+            // Moodle cohort enrolment: {enrol}.enrol='cohort' and {enrol}.customint1=cohortid
             $rows = $DB->get_records_sql(
                 "SELECT DISTINCT e.courseid FROM {enrol} e
-                 JOIN {cohort_enrolments} ce ON ce.enrolid = e.id
-                 WHERE ce.cohortid = :cid AND e.enrol = 'cohort'",
+                 WHERE e.enrol = 'cohort' AND e.customint1 = :cid AND e.status = 0",
                 ['cid' => (int)$data->cohortid]
             );
             $courseids = array_column($rows, 'courseid');
@@ -218,7 +217,7 @@ if ($action === 'add' || ($action === 'edit' && $groupid > 0)) {
 
     // Display form (add/edit)
     echo $OUTPUT->header();
-    echo lt_page_header(
+    echo local_learnpath_page_header(
         $action === 'edit' ? get_string('edit_group', 'local_learnpath') : get_string('add_group', 'local_learnpath'),
         '',
         new moodle_url('/local/learnpath/manage.php'),
@@ -227,12 +226,12 @@ if ($action === 'add' || ($action === 'edit' && $groupid > 0)) {
     echo html_writer::start_div('lt-card lt-form-card');
     $form->display();
     echo html_writer::end_div();
-    echo lt_footer();
+    echo local_learnpath_footer();
     echo $OUTPUT->footer();
     exit;
 }
 
-function lt_render_path_managers(int $groupid, int $ownerid): string {
+function local_learnpath_render_path_managers(int $groupid, int $ownerid): string {
 global $DB;
 $owner = $DB->get_record('user', ['id' => $ownerid, 'deleted' => 0]);
 $html  = '';
@@ -272,7 +271,7 @@ return $html;
 echo $OUTPUT->header();
 echo html_writer::link(new moodle_url('/local/learnpath/welcome.php'), '🏠 Welcome', ['style' => 'display:inline-block;margin-bottom:10px;margin-right:10px;font-family:var(--lt-font);font-size:.84rem;color:var(--lt-accent);text-decoration:none']);
 try {
-echo lt_page_header(
+echo local_learnpath_page_header(
     get_string('manage_paths', 'local_learnpath'),
     get_string('manage_paths_subtitle', 'local_learnpath'),
     new moodle_url('/local/learnpath/overview.php'),
@@ -394,7 +393,7 @@ if (empty($groups)) {
             ) .
             html_writer::tag('td', $typebadge) .
             html_writer::tag('td', html_writer::tag('span', $count . ' course' . ($count !== 1 ? 's' : ''), ['class' => 'lt-course-count'])) .
-            html_writer::tag('td', lt_render_path_managers($g->id, $g->createdby)) .
+            html_writer::tag('td', local_learnpath_render_path_managers($g->id, $g->createdby)) .
             html_writer::tag('td', $deadline_disp) .
             html_writer::tag('td', $actions, ['style' => 'white-space:nowrap;min-width:360px'])
         );
@@ -433,7 +432,7 @@ if (empty($groups)) {
     echo html_writer::end_div(); // lt-card
 }
 
-echo lt_footer();
+echo local_learnpath_footer();
 } catch (\Throwable $e) {
     echo '<div style="margin:20px;padding:16px;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;font-family:system-ui"><strong>Error:</strong> ' . htmlspecialchars($e->getMessage()) . '<br><small>' . htmlspecialchars($e->getFile()) . ':' . $e->getLine() . '</small></div>';
 }
@@ -441,7 +440,7 @@ echo $OUTPUT->footer();
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
-function lt_page_header(string $title, string $subtitle = '', ?moodle_url $backurl = null, bool $showback = false): string {
+function local_learnpath_page_header(string $title, string $subtitle = '', ?moodle_url $backurl = null, bool $showback = false): string {
     $back = ($showback && $backurl)
         ? html_writer::link($backurl, '← ' . get_string('back_to_dashboard', 'local_learnpath'), ['class' => 'lt-back-link'])
         : '';
@@ -453,7 +452,7 @@ function lt_page_header(string $title, string $subtitle = '', ?moodle_url $backu
     );
 }
 
-function lt_footer(): string {
+function local_learnpath_footer(): string {
     return html_writer::div(
         html_writer::tag('span', '© Michael Adeniran') . '<span class="lt-sep">·</span>' .
         html_writer::link('mailto:michaeladeniransnr@gmail.com', 'michaeladeniransnr@gmail.com') . '<span class="lt-sep">·</span>' .

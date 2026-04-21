@@ -24,7 +24,6 @@ $PAGE->set_url(new moodle_url('/local/learnpath/index.php', ['groupid' => $group
 $PAGE->set_context($ctx);
 $PAGE->set_pagelayout('report');
 $PAGE->set_title('LearnTrack — Dashboard');
-$PAGE->requires->css('/local/learnpath/styles.css');
 
 global $USER, $OUTPUT, $DB;
 $isadmin = has_capability('local/learnpath:manage', $ctx);
@@ -289,9 +288,9 @@ if (!$groupid) {
 
         // Data table
         if ($view === 'certs') {
-            lt_render_certs($groupid, $gcourses, $isadmin);
+            local_learnpath_render_certs($groupid, $gcourses, $isadmin);
         } elseif ($view === 'comparison') {
-            lt_render_comparison($groupid, $USER->id, $user_status, $gcourses);
+            local_learnpath_render_comparison($groupid, $USER->id, $user_status, $gcourses);
         } elseif ($view === 'detail') {
             $data = \local_learnpath\data\helper::get_progress_detail($groupid, $USER->id, $user_status);
             if ($course_filter > 0) {
@@ -300,7 +299,7 @@ if (!$groupid) {
             if (empty($data)) {
                 echo '<div style="padding:32px;text-align:center;color:#9ca3af;font-family:var(--lt-font)">No data for current filters.</div>';
             } else {
-                lt_render_detail($data, $sortcol, $sortdir, $groupid, $view, $course_filter);
+                local_learnpath_render_detail($data, $sortcol, $sortdir, $groupid, $view, $course_filter);
             }
         } else {
             // Summary view
@@ -316,7 +315,7 @@ if (!$groupid) {
             if (empty($data)) {
                 echo '<div style="padding:32px;text-align:center;color:#9ca3af;font-family:var(--lt-font)">No data for current filters.</div>';
             } else {
-                lt_render_summary($data, $sortcol, $sortdir, $groupid, $view);
+                local_learnpath_render_summary($data, $sortcol, $sortdir, $groupid, $view);
             }
         }
     }
@@ -407,7 +406,7 @@ echo $OUTPUT->footer();
 
 // ── RENDER FUNCTIONS ─────────────────────────────────────────────────────────
 
-function lt_render_comparison(int $groupid, int $viewerid, string $user_status, array $gcourses): void {
+function local_learnpath_render_comparison(int $groupid, int $viewerid, string $user_status, array $gcourses): void {
     global $DB;
     $learners = \local_learnpath\data\helper::get_learners_for_group($groupid, $viewerid, $user_status);
     if (empty($learners) || empty($gcourses)) {
@@ -530,7 +529,7 @@ function lt_render_comparison(int $groupid, int $viewerid, string $user_status, 
     echo '</tbody></table></div>';
 }
 
-function lt_sort_th(string $col, string $label, string $cur, string $dir): string {
+function local_learnpath_sort_th(string $col, string $label, string $cur, string $dir): string {
     global $groupid, $view, $course_filter;
     $nd = ($cur === $col && $dir === 'asc') ? 'desc' : 'asc';
     $url = new moodle_url('/local/learnpath/index.php', ['groupid'=>$groupid,'view'=>$view,'sortcol'=>$col,'sortdir'=>$nd,'course_filter'=>$course_filter]);
@@ -538,7 +537,7 @@ function lt_sort_th(string $col, string $label, string $cur, string $dir): strin
     return '<th>' . html_writer::link($url, $label . $arrow, ['style' => 'color:inherit;text-decoration:none']) . '</th>';
 }
 
-function lt_progress_bar(int $pct): string {
+function local_learnpath_progress_bar(int $pct): string {
     $color = $pct >= 100 ? '#10b981' : ($pct > 0 ? '#f59e0b' : '#d1d5db');
     return '<div style="display:flex;align-items:center;gap:7px">'
         . '<div style="width:80px;height:7px;background:#e5e7eb;border-radius:100px;overflow:hidden">'
@@ -546,7 +545,7 @@ function lt_progress_bar(int $pct): string {
         . '<span style="font-size:.78rem;font-weight:800">' . $pct . '%</span></div>';
 }
 
-function lt_enroll_user_in_courses(int $userid, int $groupid): string {
+function local_learnpath_enroll_user_in_courses(int $userid, int $groupid): string {
     global $DB;
     // Get all courses in this path
     $courses = $DB->get_records('local_learnpath_group_courses', ['groupid' => $groupid]);
@@ -592,7 +591,7 @@ function lt_enroll_user_in_courses(int $userid, int $groupid): string {
     return 'No manual enrolment available or already enrolled.';
 }
 
-function lt_render_summary(array $data, string $sc, string $sd, int $gid, string $view): void {
+function local_learnpath_render_summary(array $data, string $sc, string $sd, int $gid, string $view): void {
     global $DB;
     echo '<div style="padding:10px 14px;background:#f8fafc;border-bottom:1px solid #e5e7eb;display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-family:var(--lt-font);font-size:.78rem">';
     echo '<label style="display:flex;align-items:center;gap:5px;color:#6b7280;cursor:pointer"><input type="checkbox" id="lt-select-all" onchange="ltToggleAll(this.checked)"> Select All</label>';
@@ -602,13 +601,13 @@ function lt_render_summary(array $data, string $sc, string $sd, int $gid, string
     echo '</div>';
     echo '<div style="overflow-x:auto"><table class="lt-data-table" id="lt-summary-table"><thead><tr>';
     echo '<th style="width:32px"></th>'; // checkbox col
-    echo lt_sort_th('lastname',        'Learner',    $sc, $sd);
-    echo lt_sort_th('email',           'Email',      $sc, $sd);
-    echo lt_sort_th('overall_progress','Progress',   $sc, $sd);
-    echo lt_sort_th('completed_courses','Completed', $sc, $sd);
+    echo local_learnpath_sort_th('lastname',        'Learner',    $sc, $sd);
+    echo local_learnpath_sort_th('email',           'Email',      $sc, $sd);
+    echo local_learnpath_sort_th('overall_progress','Progress',   $sc, $sd);
+    echo local_learnpath_sort_th('completed_courses','Completed', $sc, $sd);
     echo '<th style="white-space:nowrap" title="Not Enrolled in course(s)">Not Enrolled</th>';
-    echo lt_sort_th('engagement_score', 'Score', $sc, $sd);
-    echo lt_sort_th('status_sort',      'Status', $sc, $sd);
+    echo local_learnpath_sort_th('engagement_score', 'Score', $sc, $sd);
+    echo local_learnpath_sort_th('status_sort',      'Status', $sc, $sd);
     echo '<th>Actions</th>';
     echo '</tr></thead><tbody>';
     if ($sc) {
@@ -659,7 +658,7 @@ function lt_render_summary(array $data, string $sc, string $sd, int $gid, string
         echo '<td><input type="checkbox" class="lt-row-check" value="' . (int)$row->userid . '" onchange="ltCountSelected()"></td>';
         echo '<td><div class="lt-learner-name">' . format_string($row->firstname . ' ' . $row->lastname) . '</div></td>';
         echo '<td><a href="mailto:' . s($row->email) . '" class="lt-email">' . s($row->email) . '</a></td>';
-        echo '<td>' . lt_progress_bar((int)$row->overall_progress) . '</td>';
+        echo '<td>' . local_learnpath_progress_bar((int)$row->overall_progress) . '</td>';
         echo '<td>' . ($row->completed_courses ?? 0) . '/' . ($row->total_courses ?? 0) . '</td>';
         // Not Enrolled column
         $ne_count = count($ne_courses);
@@ -710,7 +709,7 @@ function lt_render_summary(array $data, string $sc, string $sd, int $gid, string
     echo '</tbody></table></div>';
 }
 
-function lt_render_certs(int $gid, array $gcourses, bool $isadmin): void {
+function local_learnpath_render_certs(int $gid, array $gcourses, bool $isadmin): void {
     global $DB, $USER;
     $learners = \local_learnpath\data\helper::get_learners_for_group($gid, $USER->id, 'active');
     if (empty($learners)) {
@@ -741,7 +740,7 @@ function lt_render_certs(int $gid, array $gcourses, bool $isadmin): void {
         echo '<tr>';
         echo '<td><div class="lt-learner-name">' . format_string($learner->firstname . ' ' . $learner->lastname) . '</div>';
         echo '<div style="font-size:.72rem;color:#9ca3af">' . s($learner->email) . '</div></td>';
-        echo '<td>' . lt_progress_bar($pct) . '</td>';
+        echo '<td>' . local_learnpath_progress_bar($pct) . '</td>';
         if ($cert) {
             echo '<td><span style="background:#d1fae5;color:#065f46;font-size:.72rem;font-weight:700;padding:3px 10px;border-radius:100px">🎓 Issued</span></td>';
             echo '<td style="font-size:.78rem">' . userdate($cert->issuedate, get_string('strftimedatefullshort')) . '</td>';
@@ -766,12 +765,12 @@ function lt_render_certs(int $gid, array $gcourses, bool $isadmin): void {
     echo '</tbody></table></div>';
 }
 
-function lt_render_detail(array $data, string $sc, string $sd, int $gid, string $view, int $cf): void {
+function local_learnpath_render_detail(array $data, string $sc, string $sd, int $gid, string $view, int $cf): void {
     global $DB;
     echo '<div style="overflow-x:auto"><table class="lt-data-table"><thead><tr>';
-    echo lt_sort_th('lastname',  'Learner',  $sc, $sd);
-    echo lt_sort_th('coursename','Course',   $sc, $sd);
-    echo lt_sort_th('progress',  'Progress', $sc, $sd);
+    echo local_learnpath_sort_th('lastname',  'Learner',  $sc, $sd);
+    echo local_learnpath_sort_th('coursename','Course',   $sc, $sd);
+    echo local_learnpath_sort_th('progress',  'Progress', $sc, $sd);
     echo '<th>Status</th><th>Activities</th><th>Enrolment</th></tr></thead><tbody>';
     if ($sc) {
         usort($data, function($a,$b) use ($sc,$sd) {
@@ -800,7 +799,7 @@ function lt_render_detail(array $data, string $sc, string $sd, int $gid, string 
         echo '<tr>';
         echo '<td>' . format_string($row->firstname . ' ' . $row->lastname) . '</td>';
         echo '<td>' . format_string($row->coursename) . '</td>';
-        echo '<td>' . lt_progress_bar((int)($row->progress ?? 0)) . '</td>';
+        echo '<td>' . local_learnpath_progress_bar((int)($row->progress ?? 0)) . '</td>';
         echo '<td>' . $icon . ' ' . ucfirst($row->status ?? 'notstarted') . '</td>';
         echo '<td>' . ($row->completed_activities ?? 0) . '/' . ($row->total_activities ?? 0) . '</td>';
         echo '<td>';

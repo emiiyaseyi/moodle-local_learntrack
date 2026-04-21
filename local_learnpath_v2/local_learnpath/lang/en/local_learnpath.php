@@ -173,4 +173,7 @@ $string['privacy:metadata:email_log:timesent']     = 'When the email was sent.';
 $string['managers_section'] = 'Path Managers & Access';
 $string['path_owner'] = 'Path Owner';
 
+// Export
+$string['invalidformat'] = 'Invalid export format. Allowed formats: xlsx, csv, pdf.';
+
 // Auto-added missing strings

@@ -16,7 +16,6 @@ $PAGE->set_url(new moodle_url('/local/learnpath/mypath.php', ['groupid' => $grou
 $PAGE->set_context(context_system::instance());
 $PAGE->set_pagelayout('standard');
 $PAGE->set_title('LearnTrack — My Learning Paths');
-$PAGE->requires->css('/local/learnpath/styles.css');
 
 global $USER, $OUTPUT, $DB;
 $brand = get_config('local_learnpath', 'brand_color') ?: '#1e3a5f';

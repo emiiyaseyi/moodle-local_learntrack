@@ -22,7 +22,6 @@ $PAGE->set_url(new moodle_url('/local/learnpath/reminders.php', ['groupid'=>$gro
 $PAGE->set_context(context_system::instance());
 $PAGE->set_pagelayout('report');
 $PAGE->set_title('LearnTrack — Reminders');
-$PAGE->requires->css('/local/learnpath/styles.css');
 
 $brand = get_config('local_learnpath', 'brand_color') ?: '#1e3a5f';
 

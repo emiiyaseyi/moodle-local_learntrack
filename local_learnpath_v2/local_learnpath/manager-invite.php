@@ -169,7 +169,6 @@ $PAGE->set_url(new moodle_url('/local/learnpath/manager-invite.php', ['groupid' 
 $PAGE->set_context($ctx);
 $PAGE->set_pagelayout('report');
 $PAGE->set_title('Manager Invites — ' . format_string($group->name));
-$PAGE->requires->css('/local/learnpath/styles.css');
 
 echo $OUTPUT->header();
 echo '<style>:root{--lt-primary:' . $brand . ';--lt-accent:' . $brand . '}</style>';

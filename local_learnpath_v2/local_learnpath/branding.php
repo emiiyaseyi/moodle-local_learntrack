@@ -10,7 +10,6 @@ $PAGE->set_url(new moodle_url('/local/learnpath/branding.php'));
 $PAGE->set_context(context_system::instance());
 $PAGE->set_pagelayout('report');
 $PAGE->set_title('LearnTrack Branding');
-$PAGE->requires->css('/local/learnpath/styles.css');
 global $OUTPUT, $DB, $CFG;
 
 $saved = false;
@@ -33,19 +32,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && confirm_sesskey()) {
     $saved = true;
 }
 
-function lp_bcfg(string $k, $d = '') {
+function local_learnpath_branding_cfg(string $k, $d = '') {
     $v = get_config('local_learnpath', $k);
     return ($v !== false && $v !== null && $v !== '') ? $v : $d;
 }
 
-function lt_card(string $title, string $body): void {
+function local_learnpath_cert_card(string $title, string $body): void {
     echo '<div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;margin-bottom:16px;overflow:hidden">';
     echo '<div style="padding:12px 18px;border-bottom:1px solid #f3f4f6;background:#f8fafc;font-family:var(--lt-font);font-size:.84rem;font-weight:700;color:#374151">' . $title . '</div>';
     echo '<div style="padding:18px 20px">' . $body . '</div>';
     echo '</div>';
 }
 
-function lt_text_field(string $name, string $label, string $val, string $hint = ''): string {
+function local_learnpath_text_field(string $name, string $label, string $val, string $hint = ''): string {
     return '<div style="margin-bottom:13px;font-family:var(--lt-font)">'
         . '<label style="font-size:.74rem;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:5px">' . htmlspecialchars($label) . '</label>'
         . '<input type="text" name="' . htmlspecialchars($name) . '" value="' . s($val) . '"'
@@ -55,7 +54,7 @@ function lt_text_field(string $name, string $label, string $val, string $hint = 
         . '</div>';
 }
 
-function lt_toggle(string $name, string $label, string $hint, int $on): string {
+function local_learnpath_toggle_field(string $name, string $label, string $hint, int $on): string {
     $bg = $on ? '#3b82f6' : '#d1d5db';
     $lx = $on ? '23' : '3';
     $ck = $on ? ' checked' : '';
@@ -72,7 +71,7 @@ function lt_toggle(string $name, string $label, string $hint, int $on): string {
         . '</span></label></div>';
 }
 
-function lt_select_field(string $name, string $label, array $opts, string $cur, string $id = ''): string {
+function local_learnpath_select_field(string $name, string $label, array $opts, string $cur, string $id = ''): string {
     $attr = 'name="' . htmlspecialchars($name) . '"';
     if ($id) $attr .= ' id="' . $id . '"';
     $attr .= ' style="font-family:var(--lt-font);font-size:.86rem;border:1.5px solid #e5e7eb;border-radius:8px;padding:7px 10px;background:#f9fafb;width:100%;max-width:340px;outline:none"';
@@ -87,8 +86,8 @@ function lt_select_field(string $name, string $label, array $opts, string $cur, 
     return $html;
 }
 
-$brand      = lp_bcfg('brand_color', '#1e3a5f');
-$logo_path  = lp_bcfg('cert_logo_path', '');
+$brand      = local_learnpath_branding_cfg('brand_color', '#1e3a5f');
+$logo_path  = local_learnpath_branding_cfg('cert_logo_path', '');
 $serve_url  = $logo_path ? (new moodle_url('/local/learnpath/logo_upload.php',['serve'=>1]))->out(false).'&t='.time() : '';
 $upload_url = (new moodle_url('/local/learnpath/logo_upload.php'))->out(false);
 $upload_sk  = sesskey();
@@ -107,15 +106,15 @@ echo '<form method="post" style="max-width:820px">';
 echo html_writer::empty_tag('input', ['type'=>'hidden','name'=>'sesskey','value'=>sesskey()]);
 
 // 1. Identity
-lt_card('Identity',
-    lt_text_field('brand_name','Plugin Display Name',lp_bcfg('brand_name','LearnTrack'),'Shown in headers') .
-    lt_text_field('email_sender_name','Email Sender Name',lp_bcfg('email_sender_name','LearnTrack'),'Name on outgoing emails') .
-    lt_text_field('invite_expiry_hours','Manager Invite Expiry (hours)',(string)(int)lp_bcfg('invite_expiry_hours','24'),'Hours before invite links expire (default 24)')
+local_learnpath_cert_card('Identity',
+    local_learnpath_text_field('brand_name','Plugin Display Name',local_learnpath_branding_cfg('brand_name','LearnTrack'),'Shown in headers') .
+    local_learnpath_text_field('email_sender_name','Email Sender Name',local_learnpath_branding_cfg('email_sender_name','LearnTrack'),'Name on outgoing emails') .
+    local_learnpath_text_field('invite_expiry_hours','Manager Invite Expiry (hours)',(string)(int)local_learnpath_branding_cfg('invite_expiry_hours','24'),'Hours before invite links expire (default 24)')
 );
 
 // 2. Colours
-$bc = lp_bcfg('brand_color','#1e3a5f');
-lt_card('Colours',
+$bc = local_learnpath_branding_cfg('brand_color','#1e3a5f');
+local_learnpath_cert_card('Colours',
     '<div style="display:flex;align-items:center;gap:10px;font-family:var(--lt-font)">'
     . '<input type="color" name="brand_color" value="' . s($bc) . '" id="ltp-col"'
     . ' style="width:48px;height:36px;border:1.5px solid #e5e7eb;border-radius:8px;padding:2px;cursor:pointer">'
@@ -129,26 +128,26 @@ $fonts=['inherit'=>'Inherit from Moodle (default)','system-ui'=>'System UI','DM 
         'Inter'=>'Inter','Roboto'=>'Roboto','Open Sans'=>'Open Sans','Poppins'=>'Poppins',
         'Georgia,serif'=>'Georgia (serif)','Arial,sans-serif'=>'Arial'];
 $sizes=[11=>'11px',12=>'12px',13=>'13px (default)',14=>'14px',15=>'15px',16=>'16px',17=>'17px',18=>'18px'];
-lt_card('Typography',
+local_learnpath_cert_card('Typography',
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">'
-    . lt_select_field('brand_font','Font Family',$fonts,lp_bcfg('brand_font','inherit'))
-    . lt_select_field('brand_font_size','Base Font Size',$sizes,(string)(int)lp_bcfg('brand_font_size',13))
+    . local_learnpath_select_field('brand_font','Font Family',$fonts,local_learnpath_branding_cfg('brand_font','inherit'))
+    . local_learnpath_select_field('brand_font_size','Base Font Size',$sizes,(string)(int)local_learnpath_branding_cfg('brand_font_size',13))
     . '</div>'
 );
 
 // 4. Visible Fields
-lt_card('Visible Fields',
-    lt_toggle('show_status','Completion Status','Show status badge',(int)lp_bcfg('show_status',1)) .
-    lt_toggle('show_grade','Grade / Score','Show learner grade',(int)lp_bcfg('show_grade',1)) .
-    lt_toggle('show_activities','Activity Count','Show activities completed/total',(int)lp_bcfg('show_activities',1)) .
-    lt_toggle('show_firstaccess','First Access Date','Show first access date',(int)lp_bcfg('show_firstaccess',1)) .
-    lt_toggle('show_lastaccess','Last Access Date','Show last access date',(int)lp_bcfg('show_lastaccess',1))
+local_learnpath_cert_card('Visible Fields',
+    local_learnpath_toggle_field('show_status','Completion Status','Show status badge',(int)local_learnpath_branding_cfg('show_status',1)) .
+    local_learnpath_toggle_field('show_grade','Grade / Score','Show learner grade',(int)local_learnpath_branding_cfg('show_grade',1)) .
+    local_learnpath_toggle_field('show_activities','Activity Count','Show activities completed/total',(int)local_learnpath_branding_cfg('show_activities',1)) .
+    local_learnpath_toggle_field('show_firstaccess','First Access Date','Show first access date',(int)local_learnpath_branding_cfg('show_firstaccess',1)) .
+    local_learnpath_toggle_field('show_lastaccess','Last Access Date','Show last access date',(int)local_learnpath_branding_cfg('show_lastaccess',1))
 );
 
 // 5. Accessibility with live preview
-$ah  = lt_toggle('high_contrast','High Contrast Mode','Increase colour contrast',(int)lp_bcfg('high_contrast',0));
-$ah .= lt_toggle('large_text','Larger Text Mode','Apply larger base font size',(int)lp_bcfg('large_text',0));
-$ah .= lt_toggle('reduce_motion','Reduce Motion','Disable transitions and animations',(int)lp_bcfg('reduce_motion',0));
+$ah  = local_learnpath_toggle_field('high_contrast','High Contrast Mode','Increase colour contrast',(int)local_learnpath_branding_cfg('high_contrast',0));
+$ah .= local_learnpath_toggle_field('large_text','Larger Text Mode','Apply larger base font size',(int)local_learnpath_branding_cfg('large_text',0));
+$ah .= local_learnpath_toggle_field('reduce_motion','Reduce Motion','Disable transitions and animations',(int)local_learnpath_branding_cfg('reduce_motion',0));
 $ah .= '<div id="lt-ap" style="margin-top:14px;padding:14px 16px;border-radius:8px;border:2px solid #e5e7eb;font-family:var(--lt-font)">'
     . '<div style="font-size:.76rem;font-weight:700;color:#6b7280;margin-bottom:10px;text-transform:uppercase;letter-spacing:.4px">Live Preview</div>'
     . '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'
@@ -171,20 +170,20 @@ $ah .= '<script>function ltApply(){'
     . '[document.getElementById("lt-ap-card"),b].forEach(function(el){if(el)el.style.transition=tr;});}'
     . 'document.querySelectorAll("[name=high_contrast],[name=large_text],[name=reduce_motion]").forEach(function(el){el.addEventListener("change",ltApply);});'
     . 'document.addEventListener("DOMContentLoaded",ltApply);</script>';
-lt_card('Accessibility', $ah);
+local_learnpath_cert_card('Accessibility', $ah);
 
 // 6. Certificate Design
 $cfn=['Georgia,serif'=>'Georgia','Times New Roman,serif'=>'Times New Roman','Palatino,serif'=>'Palatino',
       'Arial,sans-serif'=>'Arial','Helvetica,sans-serif'=>'Helvetica','Garamond,serif'=>'Garamond'];
 $cbn=['double'=>'Double line (formal)','solid'=>'Single line (clean)','ridge'=>'Ridge (embossed)','groove'=>'Groove (inset)','none'=>'None'];
-$cbg  = lp_bcfg('cert_bg_color','#fffdf6');
-$cbrd = lp_bcfg('cert_border_color','#c8a951');
-$cbrs = lp_bcfg('cert_border_style','double');
-$ctf  = lp_bcfg('cert_title_font','Georgia,serif');
-$cbf  = lp_bcfg('cert_body_font','Georgia,serif');
-$corg = lp_bcfg('cert_org_name',lp_bcfg('brand_name','LearnTrack'));
-$csig = lp_bcfg('cert_signatory_title','Learning Path Manager');
-$cft  = lp_bcfg('cert_footer_text','This certificate was issued as proof of course completion.');
+$cbg  = local_learnpath_branding_cfg('cert_bg_color','#fffdf6');
+$cbrd = local_learnpath_branding_cfg('cert_border_color','#c8a951');
+$cbrs = local_learnpath_branding_cfg('cert_border_style','double');
+$ctf  = local_learnpath_branding_cfg('cert_title_font','Georgia,serif');
+$cbf  = local_learnpath_branding_cfg('cert_body_font','Georgia,serif');
+$corg = local_learnpath_branding_cfg('cert_org_name',local_learnpath_branding_cfg('brand_name','LearnTrack'));
+$csig = local_learnpath_branding_cfg('cert_signatory_title','Learning Path Manager');
+$cft  = local_learnpath_branding_cfg('cert_footer_text','This certificate was issued as proof of course completion.');
 
 $ch = '';
 $ch .= '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;font-family:var(--lt-font);margin-bottom:12px">';
@@ -194,18 +193,18 @@ foreach ([['cert_bg_color','ltc-bg','Background Colour',$cbg],['cert_border_colo
         . ' style="width:44px;height:34px;border:1.5px solid #e5e7eb;border-radius:6px;padding:2px;cursor:pointer"></div>';
 }
 $ch .= '</div>';
-$ch .= lt_select_field('cert_border_style','Border Style',$cbn,$cbrs,'ltc-brs');
+$ch .= local_learnpath_select_field('cert_border_style','Border Style',$cbn,$cbrs,'ltc-brs');
 $ch .= '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">'
-    . lt_select_field('cert_title_font','Heading Font',$cfn,$ctf,'ltc-tf')
-    . lt_select_field('cert_body_font','Body Font',$cfn,$cbf,'ltc-bf')
+    . local_learnpath_select_field('cert_title_font','Heading Font',$cfn,$ctf,'ltc-tf')
+    . local_learnpath_select_field('cert_body_font','Body Font',$cfn,$cbf,'ltc-bf')
     . '</div>';
-$ch .= lt_text_field('cert_org_name','Issuing Organisation Name',$corg,'Shown at top of certificate');
-$ch .= lt_text_field('cert_signatory_title','Signatory Title',$csig,'Shown under signature line');
-$ch .= lt_text_field('cert_footer_text','Footer Text (small print)',$cft,'Shown at bottom of certificate');
-$ch .= lt_toggle('cert_show_logo','Show Logo','Display your LMS/brand logo',(int)lp_bcfg('cert_show_logo',1));
-$ch .= lt_toggle('cert_show_signature','Show Signature Line','Display signatory name/title',(int)lp_bcfg('cert_show_signature',1));
-$ch .= lt_toggle('cert_show_date','Show Issue Date','Display the certificate date',(int)lp_bcfg('cert_show_date',1));
-$ch .= lt_toggle('cert_show_ref','Show Reference Number','Display certificate ref',(int)lp_bcfg('cert_show_ref',1));
+$ch .= local_learnpath_text_field('cert_org_name','Issuing Organisation Name',$corg,'Shown at top of certificate');
+$ch .= local_learnpath_text_field('cert_signatory_title','Signatory Title',$csig,'Shown under signature line');
+$ch .= local_learnpath_text_field('cert_footer_text','Footer Text (small print)',$cft,'Shown at bottom of certificate');
+$ch .= local_learnpath_toggle_field('cert_show_logo','Show Logo','Display your LMS/brand logo',(int)local_learnpath_branding_cfg('cert_show_logo',1));
+$ch .= local_learnpath_toggle_field('cert_show_signature','Show Signature Line','Display signatory name/title',(int)local_learnpath_branding_cfg('cert_show_signature',1));
+$ch .= local_learnpath_toggle_field('cert_show_date','Show Issue Date','Display the certificate date',(int)local_learnpath_branding_cfg('cert_show_date',1));
+$ch .= local_learnpath_toggle_field('cert_show_ref','Show Reference Number','Display certificate ref',(int)local_learnpath_branding_cfg('cert_show_ref',1));
 
 // Logo upload with position selector
 $lms_logo_url = '';
@@ -216,7 +215,7 @@ try {
     }
 } catch (\Throwable $e_logo) {}
 $effective_logo = $serve_url ?: $lms_logo_url;
-$cert_pos = lp_bcfg('cert_logo_pos', 'top-right');
+$cert_pos = local_learnpath_branding_cfg('cert_logo_pos', 'top-right');
 $pos_opts = ['top-left'=>'Top Left','top-center'=>'Top Centre','top-right'=>'Top Right (default)',
              'bottom-left'=>'Bottom Left','bottom-center'=>'Bottom Centre','bottom-right'=>'Bottom Right'];
 
@@ -275,7 +274,7 @@ $jsd = json_encode(['bg'=>$cbg,'brd'=>$cbrd,'brs'=>$cbrs,'tf'=>$ctf,'bf'=>$cbf,
     'pathName'=>$_preview_path,'courseList'=>$_preview_course_list]);
 // cert_js_placeholder
 
-lt_card('Certificate Design', $ch);
+local_learnpath_cert_card('Certificate Design', $ch);
 
 // Live certificate preview - shown BELOW the Certificate Design card
 echo '<div class="lt-card" style="margin-bottom:16px">';
@@ -325,7 +324,7 @@ echo '// Wire up live updates';
 echo 'document.querySelectorAll("#ltc-bg,#ltc-brd,#ltc-brs,#ltc-tf,#ltc-bf").forEach(function(e){';
 echo '  e.addEventListener("input",ltCPrev);e.addEventListener("change",ltCPrev);';
 echo '});';
-echo 'document.querySelectorAll('[name="cert_org_name"],[name="cert_signatory_title"],[name="cert_footer_text"]').forEach(function(e){';
+echo 'document.querySelectorAll(\'[name="cert_org_name"],[name="cert_signatory_title"],[name="cert_footer_text"]\').forEach(function(e){';
 echo '  e.addEventListener("input",ltCPrev);';
 echo '});';
 echo '// Logo file upload handler';

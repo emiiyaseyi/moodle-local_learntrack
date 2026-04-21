@@ -15,6 +15,12 @@ $isadmin = has_capability('local/learnpath:manage', $ctx);
 
 global $DB, $USER, $OUTPUT, $CFG;
 
+// ── Set page context BEFORE action handlers (required for redirect() in Moodle 4.5+) ──
+$PAGE->set_url(new moodle_url('/local/learnpath/profile.php',
+    ['userid' => $userid, 'groupid' => $groupid]));
+$PAGE->set_context($ctx);
+$PAGE->set_pagelayout('popup');
+
 $learner = $DB->get_record('user', ['id' => $userid, 'deleted' => 0], '*', MUST_EXIST);
 $group   = $groupid > 0 ? $DB->get_record('local_learnpath_groups', ['id' => $groupid]) : null;
 
@@ -78,16 +84,11 @@ if ($isadmin) {
     }
 }
 
-// ── Safe pre-header setup (NO DH calls here) ──────────────────────────────
+// ── Pre-header setup ──────────────────────────────────────────────────────
 $brand = get_config('local_learnpath', 'brand_color') ?: '#1e3a5f';
 $bname = get_config('local_learnpath', 'brand_name')  ?: 'LearnTrack';
 
-$PAGE->set_url(new moodle_url('/local/learnpath/profile.php',
-    ['userid'=>$userid,'groupid'=>$groupid]));
-$PAGE->set_context($ctx);
-$PAGE->set_pagelayout('popup');
 $PAGE->set_title(fullname($learner) . ' — ' . $bname);
-$PAGE->requires->css('/local/learnpath/styles.css');
 
 echo $OUTPUT->header();
 try {

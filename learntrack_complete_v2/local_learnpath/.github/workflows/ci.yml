@@ -1,0 +1,116 @@
+name: LearnTrack CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  # PHP syntax check — runs on every push, no Moodle needed
+  syntax-check:
+    name: PHP Syntax Check
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        php-version: ['8.1', '8.2', '8.3']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP ${{ matrix.php-version }}
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php-version }}
+
+      - name: Check PHP syntax (local_learnpath)
+        run: find local_learnpath -name "*.php" -exec php -l {} \; | grep -v "No syntax errors" || true
+
+      - name: Check PHP syntax (block)
+        run: find block_learntrack_mypath -name "*.php" -exec php -l {} \; | grep -v "No syntax errors" || true
+
+  # Moodle plugin CI — uses moodlehq/moodle-plugin-ci
+  moodle-plugin-ci:
+    name: Moodle Plugin CI
+    runs-on: ubuntu-latest
+    needs: syntax-check
+
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 3
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - php: '8.1'
+            moodle-branch: 'MOODLE_405_STABLE'
+            database: pgsql
+          - php: '8.2'
+            moodle-branch: 'MOODLE_405_STABLE'
+            database: pgsql
+          - php: '8.3'
+            moodle-branch: 'MOODLE_501_STABLE'
+            database: pgsql
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          path: plugin
+
+      - name: Setup PHP ${{ matrix.php }}
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: pgsql, xml, curl, zip
+          coverage: none
+
+      - name: Deploy moodle-plugin-ci
+        run: |
+          composer create-project -n --no-dev --prefer-dist \
+            moodlehq/moodle-plugin-ci ci ^4
+          echo $(cd ci && pwd)/bin >> $GITHUB_PATH
+          echo CI_PHPUNIT_ARGS="" >> $GITHUB_ENV
+
+      - name: Install Moodle
+        run: |
+          moodle-plugin-ci install \
+            --plugin ./plugin/local_learnpath \
+            --db-host 127.0.0.1 \
+            --db-name moodle \
+            --db-user postgres \
+            --db-pass '' \
+            --moodle-branch ${{ matrix.moodle-branch }} \
+            --db ${{ matrix.database }}
+        env:
+          DB: ${{ matrix.database }}
+
+      - name: PHP Lint
+        if: always()
+        run: moodle-plugin-ci phplint --max-warnings 0 ./plugin/local_learnpath
+
+      - name: PHP Code Checker
+        if: always()
+        run: moodle-plugin-ci phpcs --max-warnings 0 ./plugin/local_learnpath
+
+      - name: Validate
+        if: always()
+        run: moodle-plugin-ci validate ./plugin/local_learnpath
+
+      - name: Check upgrade savepoints
+        if: always()
+        run: moodle-plugin-ci savepoints ./plugin/local_learnpath
+
+      - name: Install block plugin
+        if: always()
+        run: moodle-plugin-ci install --plugin ./plugin/block_learntrack_mypath
+
+      - name: PHP Lint (block)
+        if: always()
+        run: moodle-plugin-ci phplint --max-warnings 0 ./plugin/block_learntrack_mypath

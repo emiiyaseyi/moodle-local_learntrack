@@ -14,7 +14,6 @@ $PAGE->set_url(new moodle_url('/local/learnpath/leaderboard.php', ['groupid'=>$g
 $PAGE->set_context(context_system::instance());
 $PAGE->set_pagelayout('report');
 $PAGE->set_title('LearnTrack — Leaderboard');
-$PAGE->requires->css('/local/learnpath/styles.css');
 
 global $DB, $OUTPUT, $USER, $CFG;
 $brand   = get_config('local_learnpath', 'brand_color') ?: '#1e3a5f';
