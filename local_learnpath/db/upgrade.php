@@ -431,5 +431,12 @@ function xmldb_local_learnpath_upgrade(int $oldversion): bool {
         upgrade_plugin_savepoint(true, 2026050101, 'local', 'learnpath');
     }
 
+    if ($oldversion < 2026050102) {
+        // v2026050102: Fix cert live preview (CSP-safe via js_init_code),
+        // fix reminders action handlers (try/catch prevents fatal Moodle errors).
+        // No DB schema changes.
+        upgrade_plugin_savepoint(true, 2026050102, 'local', 'learnpath');
+    }
+
     return true;
 }

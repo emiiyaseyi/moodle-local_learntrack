@@ -41,7 +41,8 @@ $PAGE->set_title(get_string('page_title_reminders', 'local_learnpath'));
 
 $brand = get_config('local_learnpath', 'brand_color') ?: '#1e3a5f';
 
-$brand = get_config('local_learnpath', 'brand_color') ?: '#1e3a5f';
+// ── ACTION HANDLERS (wrapped in try/catch to prevent fatal errors) ───────────
+try {
 
 // ── DELETE ──────────────────────────────────────────────────────────────────
 if ($action === 'delete' && $reminderid && confirm_sesskey()) {
@@ -71,7 +72,6 @@ if ($action === 'toggle' && $reminderid && confirm_sesskey()) {
 if ($action === 'save' && confirm_sesskey()) {
     $save_gid = optional_param('save_groupid', $groupid, PARAM_INT);
     if (!$save_gid) {
-        // redirect back to form with error
         redirect(
             new moodle_url('/local/learnpath/reminders.php', ['groupid'=>0,'action'=>'add']),
             'Please select a learning path before saving.', null,
@@ -108,7 +108,6 @@ if ($action === 'save' && confirm_sesskey()) {
 
 // ── TRIGGER: show channel-selector page, then send ──────────────────────────
 if ($action === 'trigger_send' && $reminderid && confirm_sesskey()) {
-    // User has confirmed channels — now actually send
     $reminder     = $DB->get_record('local_learnpath_reminders', ['id' => $reminderid], '*', MUST_EXIST);
     $trig_groupid = (int)$reminder->groupid;
     $trig_group   = \local_learnpath\data\helper::get_group($trig_groupid);
@@ -119,7 +118,6 @@ if ($action === 'trigger_send' && $reminderid && confirm_sesskey()) {
         );
     }
 
-    // Override channels with what admin selected in the form
     $reminder->channel_email = optional_param('ch_email', 0, PARAM_INT);
     $reminder->channel_inapp = optional_param('ch_inapp', 0, PARAM_INT);
     $reminder->channel_sms   = optional_param('ch_sms',   0, PARAM_INT);
@@ -142,11 +140,14 @@ if ($action === 'trigger_send' && $reminderid && confirm_sesskey()) {
         if (!$match) { continue; }
         $learner = $DB->get_record('user', ['id' => $uid, 'deleted' => 0]);
         if (!$learner) { continue; }
-        \local_learnpath\notification\notifier::send_reminder($reminder, $learner, $trig_group, $courses);
+        try {
+            \local_learnpath\notification\notifier::send_reminder($reminder, $learner, $trig_group, $courses);
+        } catch (\Throwable $e_send) {
+            debugging('LearnTrack: send_reminder failed for user ' . $uid . ': ' . $e_send->getMessage(), DEBUG_DEVELOPER);
+        }
         $sent++;
     }
 
-    // Log this send
     $channels_used = implode('+', array_filter([
         $reminder->channel_email ? 'email' : '',
         $reminder->channel_inapp ? 'inapp' : '',
@@ -160,7 +161,6 @@ if ($action === 'trigger_send' && $reminderid && confirm_sesskey()) {
             'channel'    => $channels_used ?: 'none',
             'status'     => $sent > 0 ? 'sent' : 'no_match',
         ]);
-        // Update lastrun on the reminder record if column exists
         $tbl = new xmldb_table('local_learnpath_reminders');
         $fld = new xmldb_field('lastrun');
         if ($DB->get_manager()->field_exists($tbl, $fld)) {
@@ -169,7 +169,7 @@ if ($action === 'trigger_send' && $reminderid && confirm_sesskey()) {
     } catch (\Throwable $e_log) {}
 
     $msg = $sent > 0
-        ? "✅ Reminder sent to {$sent} learner(s) in "" . format_string($trig_group->name) . ""."
+        ? "✅ Reminder sent to {$sent} learner(s) in \u{201c}" . format_string($trig_group->name) . "\u{201d}."
         : "⚠️ No learners matched the reminder criteria (target: {$reminder->target}).";
     $notify_type = $sent > 0
         ? \core\output\notification::NOTIFY_SUCCESS
@@ -217,7 +217,11 @@ if ($action === 'bulk_remind' && confirm_sesskey()) {
                 'status' => ($cctx && is_enrolled($cctx, $buid)) ? 'enrolled' : 'notenrolled',
             ];
         }
-        \local_learnpath\notification\notifier::send_reminder($fake_reminder, $learner, $remind_group, $course_list);
+        try {
+            \local_learnpath\notification\notifier::send_reminder($fake_reminder, $learner, $remind_group, $course_list);
+        } catch (\Throwable $e_bulk) {
+            debugging('LearnTrack: bulk send_reminder failed for user ' . $buid . ': ' . $e_bulk->getMessage(), DEBUG_DEVELOPER);
+        }
         $sent++;
     }
     $redir = $groupid > 0
@@ -225,6 +229,16 @@ if ($action === 'bulk_remind' && confirm_sesskey()) {
         : new moodle_url('/local/learnpath/overview.php');
     redirect($redir, "Reminder sent to {$sent} learner(s).",
         null, \core\output\notification::NOTIFY_SUCCESS);
+}
+
+} catch (\Throwable $e_action) {
+    // Action failed — redirect back to list with error rather than showing a fatal Moodle error
+    $err_msg = 'Reminder action failed: ' . $e_action->getMessage();
+    debugging('LearnTrack reminders action error: ' . $e_action->getMessage(), DEBUG_DEVELOPER);
+    redirect(
+        new moodle_url('/local/learnpath/reminders.php', ['groupid' => $groupid]),
+        $err_msg, null, \core\output\notification::NOTIFY_ERROR
+    );
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -470,5 +484,5 @@ if ($action === 'trigger' && $reminderid) {
 
 echo '<div class="lt-footer"><span>© Michael Adeniran</span><span class="lt-sep">·</span>'
     . html_writer::link('https://www.linkedin.com/in/michaeladeniran', 'LinkedIn', ['target'=>'_blank'])
-    . '<span class="lt-sep">·</span><span>LearnTrack v2.0.0</span></div>';
+    . '<span class="lt-sep">·</span><span>LearnTrack v2.0.2</span></div>';
 echo $OUTPUT->footer();
