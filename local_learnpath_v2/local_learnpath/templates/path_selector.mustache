@@ -1,0 +1,30 @@
+{{!
+    @template local_learnpath/path_selector
+
+    Renders a "Select Learning Path" dropdown card.
+
+    Context variables:
+    - redirect_base  string  Base URL to redirect to with ?groupid= appended
+    - selected_id    int     Currently selected groupid (0 = none)
+    - groups         array   [{id, name, selected}]
+
+    @copyright 2025 Michael Adeniran
+    @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+}}
+<div class="lt-card lt-path-selector-card">
+    <div class="lt-card-body lt-path-selector-card__body">
+        <label class="lt-label lt-label--uppercase" for="lt-path-select">
+            {{#str}}select_group, local_learnpath{{/str}}
+        </label>
+        <select id="lt-path-select"
+                class="lt-select"
+                data-redirect-base="{{redirect_base}}"
+                data-amd-init="local_learnpath/path_selector"
+                aria-label="{{#str}}select_group, local_learnpath{{/str}}">
+            <option value="0">{{#str}}select_group_prompt, local_learnpath{{/str}}</option>
+            {{#groups}}
+            <option value="{{id}}"{{#selected}} selected{{/selected}}>{{name}}</option>
+            {{/groups}}
+        </select>
+    </div>
+</div>

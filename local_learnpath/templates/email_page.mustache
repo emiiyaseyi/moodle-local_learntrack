@@ -1,0 +1,117 @@
+{{!
+    @template local_learnpath/email_page
+
+    Renders the "Send Report by Email" form and send-history table.
+
+    Context variables:
+    - groupid        int     Learning path ID
+    - group_name     string  Display name of the learning path
+    - sesskey        string  Moodle sesskey for CSRF
+    - schedule_url   string  URL to the schedule page
+    - history_rows   array   [{date, sender, recipients, format, viewmode, recordcount, fmt_class}]
+    - has_history    bool    True when history_rows is non-empty
+
+    @copyright 2025 Michael Adeniran
+    @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+}}
+<div class="lt-page-header">
+    <div class="lt-header-inner">
+        <div>
+            <h1 class="lt-page-title">&#x2709;&#xFE0F; {{#str}}send_email_now, local_learnpath{{/str}}</h1>
+            <p class="lt-page-subtitle">{{group_name}}</p>
+        </div>
+    </div>
+</div>
+
+<div class="lt-card">
+    <div class="lt-card-body">
+        <form method="post" action="">
+            <input type="hidden" name="sesskey" value="{{sesskey}}">
+            <input type="hidden" name="send" value="1">
+            <div class="lt-form-grid">
+                <div>
+                    <label class="lt-label lt-label--uppercase" for="lt-email-recipients">
+                        {{#str}}schedule_recipients, local_learnpath{{/str}}
+                    </label>
+                    <textarea id="lt-email-recipients"
+                              name="recipients"
+                              rows="3"
+                              class="lt-textarea"
+                              placeholder="email@example.com, another@company.com"></textarea>
+                    <span class="lt-hint">{{#str}}schedule_recipients_help, local_learnpath{{/str}}</span>
+                </div>
+
+                <div class="lt-form-row">
+                    <div>
+                        <label class="lt-label lt-label--uppercase" for="lt-email-format">
+                            {{#str}}schedule_format, local_learnpath{{/str}}
+                        </label>
+                        <select id="lt-email-format" name="format" class="lt-select lt-select--full">
+                            <option value="xlsx">Excel (.xlsx)</option>
+                            <option value="csv">CSV</option>
+                            <option value="pdf">PDF</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="lt-label lt-label--uppercase" for="lt-email-viewmode">
+                            {{#str}}view, local_learnpath{{/str}}
+                        </label>
+                        <select id="lt-email-viewmode" name="viewmode" class="lt-select lt-select--full">
+                            <option value="summary">{{#str}}view_summary, local_learnpath{{/str}}</option>
+                            <option value="detail">{{#str}}view_detail, local_learnpath{{/str}}</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="lt-form-actions">
+                    <button type="submit" class="lt-btn lt-btn-primary">
+                        &#x2709;&#xFE0F; {{#str}}send_email_now, local_learnpath{{/str}}
+                    </button>
+                    <a href="{{schedule_url}}" class="lt-link lt-link--muted">
+                        &#x1F4C5; {{#str}}manage_schedules, local_learnpath{{/str}}
+                    </a>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="lt-card lt-card--spaced">
+    <div class="lt-card-header">
+        <h3 class="lt-card-title">&#x1F4CB; {{#str}}reminders_send_history, local_learnpath{{/str}}</h3>
+        <span class="lt-card-meta">Last 20 sends for this path</span>
+    </div>
+    <div class="lt-card-body lt-card-body--flush">
+        {{^has_history}}
+        <p class="lt-empty-inline">No emails sent yet for this path.</p>
+        {{/has_history}}
+        {{#has_history}}
+        <div class="lt-table-scroll">
+            <table class="lt-data-table">
+                <thead>
+                    <tr>
+                        <th scope="col">Date &amp; Time</th>
+                        <th scope="col">Sent By</th>
+                        <th scope="col">Recipients</th>
+                        <th scope="col">Format</th>
+                        <th scope="col">View</th>
+                        <th scope="col">Records</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{#history_rows}}
+                    <tr>
+                        <td class="lt-nowrap">{{date}}</td>
+                        <td class="lt-fw-bold">{{sender}}</td>
+                        <td class="lt-truncate" title="{{recipients}}">{{recipients}}</td>
+                        <td><span class="lt-badge lt-badge--{{fmt_class}}">{{format}}</span></td>
+                        <td>{{viewmode}}</td>
+                        <td class="lt-fw-bold">{{recordcount}}</td>
+                    </tr>
+                    {{/history_rows}}
+                </tbody>
+            </table>
+        </div>
+        {{/has_history}}
+    </div>
+</div>

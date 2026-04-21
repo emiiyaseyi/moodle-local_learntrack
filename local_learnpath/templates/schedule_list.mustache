@@ -1,0 +1,51 @@
+{{!
+    @template local_learnpath/schedule_list
+
+    Renders the Scheduled Reports list page.
+
+    Context variables:
+    - groupid        int     Selected learning path ID (0 = none)
+    - group_name     string  Display name (empty when none selected)
+    - has_group      bool    A path is selected
+    - add_url        string  URL to add a new schedule
+    - groups         array   [{id, name, selected}]   — for path selector
+    - has_schedules  bool    At least one schedule exists
+    - schedules      array   See schedule_list_item.mustache for item shape
+
+    @copyright 2025 Michael Adeniran
+    @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+}}
+<div class="lt-page-header">
+    <div class="lt-header-inner">
+        <div>
+            <h1 class="lt-page-title">&#x1F4C5; {{#str}}manage_schedules, local_learnpath{{/str}}</h1>
+            <p class="lt-page-subtitle">
+                {{#group_name}}{{group_name}}{{/group_name}}
+                {{^group_name}}{{#str}}select_group, local_learnpath{{/str}}{{/group_name}}
+            </p>
+        </div>
+        {{#has_group}}
+        <a href="{{add_url}}" class="lt-btn lt-btn-primary">+ {{#str}}add_schedule, local_learnpath{{/str}}</a>
+        {{/has_group}}
+    </div>
+</div>
+
+{{> local_learnpath/path_selector }}
+
+{{#has_schedules}}
+<div class="lt-schedule-list">
+    {{#schedules}}
+    {{> local_learnpath/schedule_list_item }}
+    {{/schedules}}
+</div>
+{{/has_schedules}}
+{{^has_schedules}}
+{{#has_group}}
+<div class="lt-empty-state">
+    <div class="lt-empty-icon">&#x1F4C5;</div>
+    <h3 class="lt-empty-title">{{#str}}no_schedules, local_learnpath{{/str}}</h3>
+    <p class="lt-empty-desc">Set up automated reports to be sent daily, weekly, or monthly.</p>
+    <a href="{{add_url}}" class="lt-btn lt-btn-primary">+ {{#str}}add_schedule, local_learnpath{{/str}}</a>
+</div>
+{{/has_group}}
+{{/has_schedules}}

@@ -1,5 +1,4 @@
 <?php
-
 // This file is part of Moodle - http://moodle.org/
 //
 // Moodle is free software: you can redistribute it and/or modify
@@ -15,6 +14,14 @@
 // You should have received a copy of the GNU General Public License
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
+/**
+ * Scheduled reports management page.
+ *
+ * @package    local_learnpath
+ * @copyright  2025 Michael Adeniran
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ */
+
 require_once(__DIR__ . '/../../config.php');
 use local_learnpath\data\helper as DH;
 use local_learnpath\form\schedule_form;
@@ -29,105 +36,184 @@ $scheduleid = optional_param('scheduleid', 0,       PARAM_INT);
 
 $group = $groupid > 0 ? DH::get_group($groupid) : null;
 
-$PAGE->set_url(new moodle_url('/local/learnpath/schedule.php', ['groupid'=>$groupid,'action'=>$action]));
+$PAGE->set_url(new moodle_url('/local/learnpath/schedule.php', ['groupid' => $groupid, 'action' => $action]));
 $PAGE->set_context(context_system::instance());
 $PAGE->set_pagelayout('report');
 $PAGE->set_title(get_string('manage_schedules', 'local_learnpath'));
+$PAGE->set_heading(get_string('pluginname', 'local_learnpath'));
 
 global $DB, $OUTPUT, $USER;
-$brand = get_config('local_learnpath','brand_color') ?: '#1e3a5f';
 
+// ── Brand colour config ───────────────────────────────────────────────────────
+$brand_cfg = [
+    'brand_color'   => get_config('local_learnpath', 'brand_color') ?: '#1e3a5f',
+    'font_size'     => (int)(get_config('local_learnpath', 'font_size') ?: 13),
+    'high_contrast' => (bool)get_config('local_learnpath', 'high_contrast'),
+    'reduce_motion' => (bool)get_config('local_learnpath', 'reduce_motion'),
+    'large_text'    => (bool)get_config('local_learnpath', 'large_text'),
+];
+
+// ── Action handlers ───────────────────────────────────────────────────────────
 if ($action === 'delete' && $scheduleid && confirm_sesskey()) {
-    $DB->delete_records('local_learnpath_schedules', ['id'=>$scheduleid,'groupid'=>$groupid]);
-    redirect(new moodle_url('/local/learnpath/schedule.php',['groupid'=>$groupid]),'Schedule deleted.',null,\core\output\notification::NOTIFY_SUCCESS);
+    $DB->delete_records('local_learnpath_schedules', ['id' => $scheduleid, 'groupid' => $groupid]);
+    redirect(
+        new moodle_url('/local/learnpath/schedule.php', ['groupid' => $groupid]),
+        get_string('schedule_deleted', 'local_learnpath'),
+        null,
+        \core\output\notification::NOTIFY_SUCCESS
+    );
 }
+
 if ($action === 'toggle' && $scheduleid && confirm_sesskey()) {
-    $s = $DB->get_record('local_learnpath_schedules', ['id'=>$scheduleid,'groupid'=>$groupid]);
-    if ($s) { $DB->update_record('local_learnpath_schedules',(object)['id'=>$s->id,'enabled'=>$s->enabled?0:1]); }
-    redirect(new moodle_url('/local/learnpath/schedule.php',['groupid'=>$groupid]));
+    $s = $DB->get_record('local_learnpath_schedules', ['id' => $scheduleid, 'groupid' => $groupid]);
+    if ($s) {
+        $DB->update_record('local_learnpath_schedules', (object)['id' => $s->id, 'enabled' => $s->enabled ? 0 : 1]);
+    }
+    redirect(new moodle_url('/local/learnpath/schedule.php', ['groupid' => $groupid]));
 }
+
+// ── Add / Edit form ───────────────────────────────────────────────────────────
 if ($action === 'add' || ($action === 'edit' && $scheduleid)) {
-    $customdata = ['groupid'=>$groupid,'id'=>0];
-    if ($scheduleid) { $s=$DB->get_record('local_learnpath_schedules',['id'=>$scheduleid,'groupid'=>$groupid],'*',MUST_EXIST); $customdata=array_merge($customdata,(array)$s); }
+    $customdata = ['groupid' => $groupid, 'id' => 0];
+    if ($scheduleid) {
+        $s = $DB->get_record('local_learnpath_schedules', ['id' => $scheduleid, 'groupid' => $groupid], '*', MUST_EXIST);
+        $customdata = array_merge($customdata, (array)$s);
+    }
     $form = new schedule_form($PAGE->url, $customdata);
-    if ($form->is_cancelled()) { redirect(new moodle_url('/local/learnpath/schedule.php',['groupid'=>$groupid])); }
+
+    if ($form->is_cancelled()) {
+        redirect(new moodle_url('/local/learnpath/schedule.php', ['groupid' => $groupid]));
+    }
+
     if ($data = $form->get_data()) {
-        $rec=(object)['groupid'=>$groupid,'recipients'=>trim($data->recipients),'frequency'=>$data->frequency,'format'=>$data->format,'viewmode'=>$data->viewmode??'summary','enabled'=>!empty($data->enabled)?1:0];
-        if (!empty($data->id)) { $rec->id=$data->id; $DB->update_record('local_learnpath_schedules',$rec); }
-        else { $rec->createdby=$USER->id;$rec->timecreated=time();$rec->nextrun=send_scheduled_reports::calc_next_run($data->frequency,time()); $DB->insert_record('local_learnpath_schedules',$rec); }
-        redirect(new moodle_url('/local/learnpath/schedule.php',['groupid'=>$groupid]),'Schedule saved.',null,\core\output\notification::NOTIFY_SUCCESS);
+        $rec = (object)[
+            'groupid'    => $groupid,
+            'recipients' => trim($data->recipients),
+            'frequency'  => $data->frequency,
+            'format'     => $data->format,
+            'viewmode'   => $data->viewmode ?? 'summary',
+            'enabled'    => !empty($data->enabled) ? 1 : 0,
+        ];
+        if (!empty($data->id)) {
+            $rec->id = $data->id;
+            $DB->update_record('local_learnpath_schedules', $rec);
+        } else {
+            $rec->createdby   = $USER->id;
+            $rec->timecreated = time();
+            $rec->nextrun     = send_scheduled_reports::calc_next_run($data->frequency, time());
+            $DB->insert_record('local_learnpath_schedules', $rec);
+        }
+        redirect(
+            new moodle_url('/local/learnpath/schedule.php', ['groupid' => $groupid]),
+            get_string('schedule_saved', 'local_learnpath'),
+            null,
+            \core\output\notification::NOTIFY_SUCCESS
+        );
     }
+
     echo $OUTPUT->header();
-    echo '<style>:root{--lt-primary:'.$brand.';--lt-accent:'.$brand.'}</style>';
-    echo html_writer::link(new moodle_url('/local/learnpath/schedule.php',['groupid'=>$groupid]),'← Schedules',['style'=>'display:inline-block;margin-bottom:14px;font-family:var(--lt-font);font-size:.84rem;color:var(--lt-accent);text-decoration:none']);
-    // If no group selected yet, show path selector in the form
-if (!$group) {
-    echo '<div class="lt-card" style="margin-bottom:16px"><div class="lt-card-body">';
-    echo '<label style="font-family:var(--lt-font);font-size:.76rem;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:6px">Select Learning Path First</label>';
-    echo '<select onchange="window.location=\'/local/learnpath/schedule.php?action=add\u0026groupid=\'+this.value" style="font-family:var(--lt-font);font-size:.88rem;border:1.5px solid #e5e7eb;border-radius:8px;padding:8px 12px;background:#f9fafb;outline:none;min-width:280px">';
-    echo '<option value="0">— Choose a path —</option>';
-    foreach ($DB->get_records('local_learnpath_groups', null, 'name ASC') as $sg) {
-        echo '<option value="' . $sg->id . '">' . format_string($sg->name) . '</option>';
+    echo $OUTPUT->render_from_template('local_learnpath/dynamic_styles', $brand_cfg);
+    echo $OUTPUT->render_from_template('local_learnpath/page_nav', [
+        'back_url'   => (new moodle_url('/local/learnpath/schedule.php', ['groupid' => $groupid]))->out(false),
+        'back_label' => '← ' . get_string('manage_schedules', 'local_learnpath'),
+    ]);
+
+    // If no group is selected yet, show a path-selector card and exit.
+    if (!$group) {
+        $all_groups = $DB->get_records('local_learnpath_groups', null, 'name ASC');
+        $group_items = [];
+        foreach ($all_groups as $sg) {
+            $group_items[] = ['id' => $sg->id, 'name' => format_string($sg->name), 'selected' => false];
+        }
+        echo $OUTPUT->render_from_template('local_learnpath/path_selector', [
+            'redirect_base' => (new moodle_url('/local/learnpath/schedule.php', ['action' => 'add', 'groupid' => '']))->out(false),
+            'selected_id'   => 0,
+            'groups'        => $group_items,
+        ]);
+        echo $OUTPUT->footer();
+        exit;
     }
-    echo '</select></div></div>';
-    echo $OUTPUT->footer(); exit;
-}
-echo '<div class="lt-page-header"><h1 class="lt-page-title">'.($scheduleid?'Edit':'New').' Schedule</h1><p class="lt-page-subtitle">'.format_string($group->name).'</p></div>';
+
+    echo '<div class="lt-page-header"><h1 class="lt-page-title">' .
+        ($scheduleid ? get_string('edit_schedule', 'local_learnpath') : get_string('add_schedule', 'local_learnpath')) .
+        '</h1><p class="lt-page-subtitle">' . format_string($group->name) . '</p></div>';
     echo '<div class="lt-card lt-form-card">';
-    $form->set_data($customdata); $form->display();
+    $form->set_data($customdata);
+    $form->display();
     echo '</div>';
+
+    $PAGE->requires->js_call_amd('local_learnpath/learntrack_init', 'init');
     echo $OUTPUT->footer();
     exit;
 }
 
+// ── List page ─────────────────────────────────────────────────────────────────
+$all_groups = $DB->get_records('local_learnpath_groups', null, 'name ASC');
+$group_items = [];
+foreach ($all_groups as $sg) {
+    $group_items[] = [
+        'id'       => $sg->id,
+        'name'     => format_string($sg->name),
+        'selected' => ($sg->id == $groupid),
+    ];
+}
+
+$schedules_raw = $groupid > 0 ? $DB->get_records('local_learnpath_schedules', ['groupid' => $groupid]) : [];
+$freq_icons = ['daily' => '⚡', 'weekly' => '📆', 'monthly' => '🗓️'];
+$freq_bg    = ['daily' => '#fee2e2', 'weekly' => '#dbeafe', 'monthly' => '#d1fae5'];
+
+$schedule_items = [];
+foreach ($schedules_raw as $s) {
+    $freq = $s->frequency ?? 'weekly';
+    $schedule_items[] = [
+        'freq_icon'    => $freq_icons[$freq] ?? '📅',
+        'freq_bg'      => $freq_bg[$freq] ?? '#f3f4f6',
+        'freq_label'   => ucfirst($freq),
+        'format_label' => strtoupper($s->format ?? 'xlsx'),
+        'is_active'    => (bool)$s->enabled,
+        'recipients'   => s($s->recipients),
+        'next_run'     => userdate($s->nextrun, get_string('strftimedatefullshort')),
+        'has_last_run' => !empty($s->lastrun),
+        'last_run'     => !empty($s->lastrun) ? userdate($s->lastrun, get_string('strftimedatefullshort')) : '',
+        'toggle_url'   => (new moodle_url('/local/learnpath/schedule.php', [
+            'groupid' => $groupid, 'action' => 'toggle', 'scheduleid' => $s->id, 'sesskey' => sesskey(),
+        ]))->out(false),
+        'toggle_label' => $s->enabled ? '⏸ Pause' : '▶ Resume',
+        'edit_url'     => (new moodle_url('/local/learnpath/schedule.php', [
+            'groupid' => $groupid, 'action' => 'edit', 'scheduleid' => $s->id,
+        ]))->out(false),
+        'delete_url'   => (new moodle_url('/local/learnpath/schedule.php', [
+            'groupid' => $groupid, 'action' => 'delete', 'scheduleid' => $s->id, 'sesskey' => sesskey(),
+        ]))->out(false),
+    ];
+}
+
 echo $OUTPUT->header();
-echo html_writer::link(new moodle_url('/local/learnpath/welcome.php'), '🏠 Welcome', ['style' => 'display:inline-block;margin-bottom:14px;margin-right:10px;font-family:var(--lt-font);font-size:.84rem;color:var(--lt-accent);text-decoration:none']);
-echo '<style>:root{--lt-primary:'.$brand.';--lt-accent:'.$brand.'}</style>';
-echo html_writer::link(new moodle_url('/local/learnpath/index.php',['groupid'=>$groupid]),'← Dashboard',['style'=>'display:inline-block;margin-bottom:14px;font-family:var(--lt-font);font-size:.84rem;color:var(--lt-accent);text-decoration:none']);
-// Path selector
-$all_groups_s = $DB->get_records('local_learnpath_groups', null, 'name ASC');
-echo '<div class="lt-page-header"><div class="lt-header-inner">';
-echo '<div><h1 class="lt-page-title">📅 Scheduled Reports</h1>';
-echo '<p class="lt-page-subtitle">' . ($group ? format_string($group->name) : 'Select a learning path') . '</p></div>';
-if ($groupid > 0) {
-    echo html_writer::link(new moodle_url('/local/learnpath/schedule.php',['groupid'=>$groupid,'action'=>'add']),'+ Add Schedule',['class'=>'lt-btn lt-btn-primary']);
-}
-echo '</div></div>';
+echo $OUTPUT->render_from_template('local_learnpath/dynamic_styles', $brand_cfg);
 
-// Path selector dropdown
-echo '<div class="lt-card" style="margin-bottom:14px"><div class="lt-card-body" style="padding:12px 16px">';
-echo '<label style="font-family:var(--lt-font);font-size:.74rem;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:6px">Select Learning Path</label>';
-echo '<select onchange="window.location=\'/local/learnpath/schedule.php?groupid=\'+this.value" style="font-family:var(--lt-font);font-size:.88rem;border:1.5px solid #e5e7eb;border-radius:8px;padding:8px 12px;background:#f9fafb;outline:none;min-width:280px">';
-echo '<option value="0">— Choose a path —</option>';
-foreach ($all_groups_s as $sg) {
-    $sel = $sg->id == $groupid ? ' selected' : '';
-    echo '<option value="' . $sg->id . '"' . $sel . '>' . format_string($sg->name) . '</option>';
-}
-echo '</select></div></div>';
+echo $OUTPUT->render_from_template('local_learnpath/page_nav', [
+    'home_url'   => (new moodle_url('/local/learnpath/welcome.php'))->out(false),
+    'back_url'   => (new moodle_url('/local/learnpath/index.php', ['groupid' => $groupid]))->out(false),
+    'back_label' => '← ' . get_string('back_to_dashboard', 'local_learnpath'),
+]);
 
-$schedules = $groupid > 0 ? $DB->get_records('local_learnpath_schedules',['groupid'=>$groupid]) : [];
-$freqicons = ['daily'=>'⚡','weekly'=>'📆','monthly'=>'🗓️'];
-$freqbg    = ['daily'=>'#fee2e2','weekly'=>'#dbeafe','monthly'=>'#d1fae5'];
+echo $OUTPUT->render_from_template('local_learnpath/schedule_list', [
+    'groupid'       => $groupid,
+    'group_name'    => $group ? format_string($group->name) : '',
+    'has_group'     => (bool)$group,
+    'add_url'       => (new moodle_url('/local/learnpath/schedule.php', ['groupid' => $groupid, 'action' => 'add']))->out(false),
+    'redirect_base' => (new moodle_url('/local/learnpath/schedule.php', ['groupid' => '']))->out(false),
+    'selected_id'   => $groupid,
+    'groups'        => $group_items,
+    'has_schedules' => !empty($schedule_items),
+    'schedules'     => $schedule_items,
+]);
 
-if (empty($schedules)) {
-    echo '<div class="lt-empty-state"><div class="lt-empty-icon">📅</div><h3 class="lt-empty-title">No Schedules Yet</h3><p class="lt-empty-desc">Set up automated reports to be sent daily, weekly, or monthly.</p>'.html_writer::link(new moodle_url('/local/learnpath/schedule.php',['groupid'=>$groupid,'action'=>'add']),'+ Add Schedule',['class'=>'lt-btn lt-btn-primary']).'</div>';
-} else {
-    foreach ($schedules as $s) {
-        $freq=$s->frequency??'weekly';
-        $editurl=new moodle_url('/local/learnpath/schedule.php',['groupid'=>$groupid,'action'=>'edit','scheduleid'=>$s->id]);
-        $delurl=new moodle_url('/local/learnpath/schedule.php',['groupid'=>$groupid,'action'=>'delete','scheduleid'=>$s->id,'sesskey'=>sesskey()]);
-        $togurl=new moodle_url('/local/learnpath/schedule.php',['groupid'=>$groupid,'action'=>'toggle','scheduleid'=>$s->id,'sesskey'=>sesskey()]);
-        $bg=$freqbg[$freq]??'#f3f4f6';
-        echo '<div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px 18px;margin-bottom:10px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;box-shadow:0 1px 3px rgba(0,0,0,.05);font-family:var(--lt-font)">';
-        echo '<div style="width:42px;height:42px;border-radius:10px;background:'.$bg.';display:flex;align-items:center;justify-content:center;font-size:1.3rem;flex-shrink:0">'.($freqicons[$freq]??'📅').'</div>';
-        echo '<div style="flex:1"><p style="font-size:.9rem;font-weight:700;color:#111827;margin:0 0 3px">'.ucfirst($freq).' · '.strtoupper($s->format).' &nbsp;'.($s->enabled?'<span style="background:#d1fae5;color:#065f46;font-size:.7rem;font-weight:700;padding:2px 8px;border-radius:100px">Active</span>':'<span style="background:#f3f4f6;color:#9ca3af;font-size:.7rem;font-weight:700;padding:2px 8px;border-radius:100px">Paused</span>').'</p>';
-        echo '<p style="font-size:.76rem;color:#6b7280;margin:0">📧 '.htmlspecialchars($s->recipients).' &nbsp;·&nbsp; Next: '.userdate($s->nextrun,get_string('strftimedatefullshort')).($s->lastrun?' &nbsp;·&nbsp; Last: '.userdate($s->lastrun,get_string('strftimedatefullshort')):'').'</p></div>';
-        echo '<div style="display:flex;gap:6px">';
-        echo html_writer::link($togurl,$s->enabled?'⏸ Pause':'▶ Resume',['class'=>'lt-action-btn lt-btn-view']);
-        echo html_writer::link($editurl,'✏️ Edit',['class'=>'lt-action-btn lt-btn-edit']);
-        echo html_writer::link($delurl,'🗑',['class'=>'lt-action-btn lt-btn-del','onclick'=>"return confirm('Delete this schedule?')"]);
-        echo '</div></div>';
-    }
-}
-echo '<div class="lt-footer"><span>© Michael Adeniran</span><span class="lt-sep">·</span>'.html_writer::link('https://www.linkedin.com/in/michaeladeniran','LinkedIn',['target'=>'_blank']).'<span class="lt-sep">·</span><span>LearnTrack v2.0.0</span></div>';
+echo $OUTPUT->render_from_template('local_learnpath/footer', [
+    'author'       => 'Michael Adeniran',
+    'linkedin_url' => 'https://www.linkedin.com/in/michaeladeniran',
+    'version'      => 'v2.0.0',
+]);
+
+$PAGE->requires->js_call_amd('local_learnpath/learntrack_init', 'init');
 echo $OUTPUT->footer();

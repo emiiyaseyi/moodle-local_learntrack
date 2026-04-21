@@ -1,4 +1,20 @@
 <?php
+
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
 /**
  * LearnTrack — Dashboard
  */
@@ -23,11 +39,19 @@ if (!in_array($perpage, [25, 50, 100, 200])) { $perpage = 25; }
 $PAGE->set_url(new moodle_url('/local/learnpath/index.php', ['groupid' => $groupid, 'view' => $view]));
 $PAGE->set_context($ctx);
 $PAGE->set_pagelayout('report');
-$PAGE->set_title('LearnTrack — Dashboard');
+$PAGE->set_title(get_string('dashboard', 'local_learnpath'));
 
 global $USER, $OUTPUT, $DB;
 $isadmin = has_capability('local/learnpath:manage', $ctx);
 $brand   = get_config('local_learnpath', 'brand_color') ?: '#1e3a5f';
+
+$brand_cfg = [
+    'brand_color'   => $brand,
+    'font_size'     => (int)(get_config('local_learnpath', 'font_size') ?: 13),
+    'high_contrast' => (bool)get_config('local_learnpath', 'high_contrast'),
+    'reduce_motion' => (bool)get_config('local_learnpath', 'reduce_motion'),
+    'large_text'    => (bool)get_config('local_learnpath', 'large_text'),
+];
 
 // Handle enroll action - admin clicks NE badge to enroll user into path courses
 // Unenrol handler
@@ -163,7 +187,7 @@ echo $OUTPUT->header();
 echo html_writer::link(new moodle_url('/local/learnpath/welcome.php'), '🏠 Welcome', ['style' => 'display:inline-block;margin-bottom:14px;margin-right:10px;font-family:var(--lt-font);font-size:.84rem;color:var(--lt-accent);text-decoration:none']);
 try {
 
-echo '<style>:root{--lt-primary:' . $brand . ';--lt-accent:' . $brand . '}</style>';
+echo $OUTPUT->render_from_template('local_learnpath/dynamic_styles', $brand_cfg);
 
 // Nav
 echo html_writer::link(new moodle_url('/local/learnpath/overview.php'), '← Overview',
@@ -327,75 +351,10 @@ echo '<div class="lt-footer"><span>© Michael Adeniran</span><span class="lt-sep
     . '<span class="lt-sep">·</span><span>LearnTrack v2.0.0</span></div>';
 
 // Modal for profile popup
-echo '<div id="lt-modal" class="lt-modal-overlay" onclick="if(event.target===this)closeLTModal()">';
+echo '<div id="lt-modal" class="lt-modal-overlay">';
 echo '<div class="lt-modal-box"><button class="lt-modal-close" onclick="closeLTModal()">✕</button>';
 echo '<iframe id="lt-modal-frame" src="" class="lt-modal-frame" frameborder="0"></iframe></div></div>';
-echo html_writer::script("
-function openLTProfile(uid,gid){ document.getElementById('lt-modal').classList.add('visible'); document.getElementById('lt-modal-frame').src='/local/learnpath/profile.php?userid='+uid+'&groupid='+gid; document.body.style.overflow='hidden'; }
-function closeLTModal(){ document.getElementById('lt-modal').classList.remove('visible'); document.getElementById('lt-modal-frame').src=''; document.body.style.overflow=''; }
-document.addEventListener('keydown',function(e){if(e.key==='Escape')closeLTModal();});
-
-function ltSortTable(tableId, colIdx, thEl) {
-    var table = document.getElementById(tableId);
-    if (!table) return;
-    var tbody = table.tBodies[0];
-    var rows  = Array.from(tbody.rows);
-    var asc   = thEl.dataset.sortDir !== 'asc';
-    thEl.dataset.sortDir = asc ? 'asc' : 'desc';
-    // Reset all arrows
-    table.querySelectorAll('.lt-sort-arrow').forEach(function(a){ a.textContent = '⇅'; });
-    thEl.querySelector('.lt-sort-arrow').textContent = asc ? '↑' : '↓';
-    rows.sort(function(a, b) {
-        var av = a.cells[colIdx] ? a.cells[colIdx].innerText.trim() : '';
-        var bv = b.cells[colIdx] ? b.cells[colIdx].innerText.trim() : '';
-        var an = parseFloat(av.replace('%','')), bn = parseFloat(bv.replace('%',''));
-        var cmp = (!isNaN(an) && !isNaN(bn)) ? (an - bn) : av.localeCompare(bv);
-        return asc ? cmp : -cmp;
-    });
-    rows.forEach(function(r){ tbody.appendChild(r); });
-}
-
-function ltFilterTable(q){
-    q = q.toLowerCase().trim();
-    document.querySelectorAll('#lt-summary-table .lt-learner-row').forEach(function(row){
-        var name  = row.getAttribute('data-name')  || '';
-        var email = row.getAttribute('data-email') || '';
-        row.style.display = (!q || name.includes(q) || email.includes(q)) ? '' : 'none';
-    });
-}
-function ltToggleAll(checked){
-    document.querySelectorAll('.lt-row-check').forEach(function(cb){ if(cb.closest('tr').style.display !== 'none') cb.checked = checked; });
-    ltCountSelected();
-}
-function ltCountSelected(){
-    var n = document.querySelectorAll('.lt-row-check:checked').length;
-    var el = document.getElementById('lt-bulk-count');
-    if(el) el.textContent = n > 0 ? n + ' selected' : '';
-    var sa = document.getElementById('lt-select-all');
-    if(sa){ var all = document.querySelectorAll('.lt-row-check').length; sa.indeterminate = n > 0 && n < all; sa.checked = n === all && all > 0; }
-}
-function ltBulkAction(action){
-    var ids = [];
-    document.querySelectorAll('.lt-row-check:checked').forEach(function(cb){ ids.push(cb.value); });
-    if(ids.length === 0){ alert('Please select at least one learner.'); return; }
-    var gid = document.querySelector('select[name=groupid]') ? document.querySelector('select[name=groupid]').value : new URLSearchParams(window.location.search).get('groupid');
-    if(action === 'remind'){
-        if(!confirm('Send a reminder to ' + ids.length + ' learner(s)?')) return;
-        var form = document.createElement('form'); form.method = 'post'; form.action = '/local/learnpath/reminders.php';
-        var f1 = document.createElement('input'); f1.type='hidden'; f1.name='groupid'; f1.value=gid; form.appendChild(f1);
-        var f2 = document.createElement('input'); f2.type='hidden'; f2.name='action'; f2.value='bulk_remind'; form.appendChild(f2);
-        var f3 = document.createElement('input'); f3.type='hidden'; f3.name='userids'; f3.value=ids.join(','); form.appendChild(f3);
-        var f4 = document.createElement('input'); f4.type='hidden'; f4.name='sesskey'; f4.value=M.cfg.sesskey; form.appendChild(f4);
-        document.body.appendChild(form); form.submit();
-    } else if(action === 'enroll'){
-        if(!confirm('Enrol ' + ids.length + ' selected learner(s) in all missing courses?')) return;
-        var form = document.createElement('form'); form.method = 'post'; form.action = '/local/learnpath/index.php';
-        var params = {groupid:gid,view:'summary',bulk_enroll:1,sesskey:M.cfg.sesskey,userids:ids.join(',')};
-        for(var k in params){ var fi = document.createElement('input'); fi.type='hidden'; fi.name=k; fi.value=params[k]; form.appendChild(fi); }
-        document.body.appendChild(form); form.submit();
-    }
-}
-");
+$PAGE->requires->js_call_amd('local_learnpath/dashboard', 'init');
 
 } catch (\Throwable $e) {
     echo '<div style="margin:20px;padding:16px;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;font-family:system-ui">';
