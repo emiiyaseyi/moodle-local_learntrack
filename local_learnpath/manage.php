@@ -1,4 +1,20 @@
 <?php
+
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
 /**
  * LearnTrack — Manage Learning Paths
  * Admin creates, edits, and deletes learning path groups.
@@ -23,8 +39,8 @@ $PAGE->set_url(new moodle_url('/local/learnpath/manage.php', [
 ]));
 $PAGE->set_context($ctx);
 $PAGE->set_pagelayout('report');
-$PAGE->set_title('LearnTrack — Manage Paths');
-$PAGE->set_heading('LearnTrack');
+$PAGE->set_title(get_string('manage_paths', 'local_learnpath'));
+$PAGE->set_heading(get_string('pluginname', 'local_learnpath'));
 
 global $DB, $USER, $OUTPUT;
 
@@ -352,8 +368,17 @@ if (empty($groups)) {
     echo html_writer::start_tag('tbody');
     $cards_html = [];
 
+    // Preload all course counts in a single query to avoid N+1 per group.
+    $counts_raw = $DB->get_records_sql(
+        "SELECT groupid, COUNT(id) AS cnt FROM {local_learnpath_group_courses} GROUP BY groupid"
+    );
+    $course_counts = [];
+    foreach ($counts_raw as $cr) {
+        $course_counts[(int)$cr->groupid] = (int)$cr->cnt;
+    }
+
     foreach ($groups as $g) {
-        $count    = $DB->count_records('local_learnpath_group_courses', ['groupid' => $g->id]);
+        $count    = $course_counts[(int)$g->id] ?? 0;
         $editurl  = new moodle_url('/local/learnpath/manage.php',   ['action' => 'edit',   'groupid' => $g->id]);
         $delurl   = new moodle_url('/local/learnpath/manage.php',   ['action' => 'delete', 'groupid' => $g->id, 'sesskey' => sesskey()]);
         $viewurl  = new moodle_url('/local/learnpath/index.php',    ['groupid' => $g->id]);

@@ -1,4 +1,20 @@
 <?php
+
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
 /**
  * LearnTrack — Dashboard
  */
@@ -23,7 +39,7 @@ if (!in_array($perpage, [25, 50, 100, 200])) { $perpage = 25; }
 $PAGE->set_url(new moodle_url('/local/learnpath/index.php', ['groupid' => $groupid, 'view' => $view]));
 $PAGE->set_context($ctx);
 $PAGE->set_pagelayout('report');
-$PAGE->set_title('LearnTrack — Dashboard');
+$PAGE->set_title(get_string('dashboard', 'local_learnpath'));
 
 global $USER, $OUTPUT, $DB;
 $isadmin = has_capability('local/learnpath:manage', $ctx);

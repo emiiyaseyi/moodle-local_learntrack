@@ -1,4 +1,20 @@
 <?php
+
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
 require_once(__DIR__ . '/../../config.php');
 use local_learnpath\data\helper as DH;
 use local_learnpath\form\schedule_form;
@@ -16,7 +32,7 @@ $group = $groupid > 0 ? DH::get_group($groupid) : null;
 $PAGE->set_url(new moodle_url('/local/learnpath/schedule.php', ['groupid'=>$groupid,'action'=>$action]));
 $PAGE->set_context(context_system::instance());
 $PAGE->set_pagelayout('report');
-$PAGE->set_title('LearnTrack — Schedules');
+$PAGE->set_title(get_string('manage_schedules', 'local_learnpath'));
 
 global $DB, $OUTPUT, $USER;
 $brand = get_config('local_learnpath','brand_color') ?: '#1e3a5f';
