@@ -30,6 +30,15 @@ function local_learnpath_extend_navigation(global_navigation $nav): void {
         return;
     }
 
+    // Guard: tables may not exist during fresh install / upgrade.
+    try {
+        if (!$DB->get_manager()->table_exists('local_learnpath_groups')) {
+            return;
+        }
+    } catch (\Throwable $e) {
+        return;
+    }
+
     $ctx     = context_system::instance();
     $isadmin = has_capability('local/learnpath:manage',        $ctx);
     $canview = has_capability('local/learnpath:viewdashboard', $ctx);
@@ -91,6 +100,15 @@ function local_learnpath_after_require_login(): void {
 
     // Only for logged-in, non-guest, non-admin users
     if (!isloggedin() || isguestuser()) {
+        return;
+    }
+
+    // Guard: tables may not exist during fresh install / upgrade.
+    try {
+        if (!$DB->get_manager()->table_exists('local_learnpath_groups')) {
+            return;
+        }
+    } catch (\Throwable $e) {
         return;
     }
 

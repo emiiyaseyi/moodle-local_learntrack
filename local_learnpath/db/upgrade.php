@@ -421,8 +421,14 @@ function xmldb_local_learnpath_upgrade(int $oldversion): bool {
         // v2026050100: Critical fixes — profile, reminders, branding pages loading.
         // Fix: global $DB added to branding.php, use-statement removed from reminders.php,
         // profile.php confirm_sesskey only on action. No DB schema changes.
-        // After upgrading: go to Site Admin → Development → Purge All Caches.
         upgrade_plugin_savepoint(true, 2026050100, 'local', 'learnpath');
+    }
+
+    if ($oldversion < 2026050101) {
+        // v2026050101: Mustache templates + AMD modules (Issue #4).
+        // Added lib.php table-existence guards to prevent crash during fresh install.
+        // No DB schema changes.
+        upgrade_plugin_savepoint(true, 2026050101, 'local', 'learnpath');
     }
 
     return true;
