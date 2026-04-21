@@ -176,4 +176,55 @@ $string['path_owner'] = 'Path Owner';
 // Export
 $string['invalidformat'] = 'Invalid export format. Allowed formats: xlsx, csv, pdf.';
 
+// Page titles
+$string['page_title_reminders']    = 'LearnTrack — Reminders';
+$string['page_title_branding']     = 'LearnTrack Branding';
+$string['page_title_overview']     = 'LearnTrack — Overview';
+$string['page_title_leaderboard']  = 'LearnTrack — Leaderboard';
+$string['page_title_courseinsights'] = 'Course Insights';
+$string['page_title_mypath']       = 'My Learning Paths';
+$string['page_title_welcome']      = 'LearnTrack — Welcome';
+
+// Branding page
+$string['branding_page_title']     = 'Branding & Customisation';
+$string['branding_page_subtitle']  = 'Customise the plugin\'s appearance, visible fields, and accessibility features.';
+$string['branding_saved']          = 'Branding settings saved!';
+$string['branding_identity']       = 'Identity';
+$string['branding_colours']        = 'Colours';
+$string['branding_typography']     = 'Typography';
+$string['branding_visible_fields'] = 'Visible Fields';
+$string['branding_accessibility']  = 'Accessibility';
+$string['branding_cert_design']    = 'Certificate Design';
+$string['branding_cert_preview']   = 'Live Certificate Preview';
+$string['branding_save']           = 'Save Branding Settings';
+
+// Welcome page
+$string['welcome_title']           = 'Welcome to LearnTrack';
+$string['welcome_subtitle']        = 'Your Moodle Learning Path Dashboard';
+$string['welcome_features_title']  = 'What this plugin does';
+$string['welcome_diagnostics']     = 'Diagnostics';
+
+// Reminders page
+$string['reminders_title']         = 'Reminders & Notifications';
+$string['reminders_subtitle']      = 'Automate learner nudges via email, in-app & SMS';
+$string['reminders_new_rule']      = '+ New Rule';
+$string['reminders_no_rules']      = 'No Reminder Rules Yet';
+$string['reminders_no_rules_desc'] = 'Create a rule to automatically notify learners who haven\'t started or completed their path.';
+$string['reminders_create_first']  = '+ Create First Rule';
+$string['reminders_send_now_title']= 'Send Reminder Now';
+$string['reminders_save_rule']     = 'Save Rule';
+$string['reminders_rule_deleted']  = 'Reminder rule deleted.';
+$string['reminders_rule_saved']    = 'Reminder rule saved.';
+$string['reminders_send_history']  = 'Send History';
+$string['reminders_select_path']   = 'Please select a learning path before saving.';
+
+// Overview / analytics
+$string['overview_title']          = 'Site-Wide Analytics';
+$string['overview_subtitle']       = 'Full picture across all learning paths';
+
+// Diagnostics
+$string['diagnostics_title']       = 'Database Diagnostics';
+$string['diagnostics_table_ok']    = 'Table exists';
+$string['diagnostics_table_miss']  = 'Table missing';
+
 // Auto-added missing strings
