@@ -184,5 +184,5 @@ if ($has_certs) {
 
 echo '<div class="lt-footer"><span>© Michael Adeniran</span><span class="lt-sep">·</span>'
     . html_writer::link('https://www.linkedin.com/in/michaeladeniran','LinkedIn',['target'=>'_blank'])
-    . '<span class="lt-sep">·</span><span>LearnTrack v2.0.0</span></div>';
+    . '<span class="lt-sep">·</span><span>LearnTrack v1.0.0</span></div>';
 echo $OUTPUT->footer();

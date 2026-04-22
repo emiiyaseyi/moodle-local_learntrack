@@ -302,8 +302,9 @@ echo html_writer::div(
 
 $addurl = new moodle_url('/local/learnpath/manage.php', ['action' => 'add']);
 
-echo html_writer::start_div('', ['style' => 'display:flex;gap:8px;margin-bottom:14px']);
+echo html_writer::start_div('', ['style' => 'display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px']);
 echo html_writer::link($addurl, '+ ' . get_string('add_group', 'local_learnpath'), ['class' => 'lt-btn lt-btn-primary']);
+echo html_writer::link(new moodle_url('/local/learnpath/managers.php'), '👥 Managers & Access', ['class' => 'lt-btn lt-btn-outline']);
 echo html_writer::end_div();
 
 // Debug panel — activated via ?debug=1 (linked from Welcome > Diagnostics)
@@ -483,7 +484,7 @@ function local_learnpath_footer(): string {
         html_writer::link('mailto:michaeladeniransnr@gmail.com', 'michaeladeniransnr@gmail.com') . '<span class="lt-sep">·</span>' .
         html_writer::link('https://www.linkedin.com/in/michaeladeniran', 'LinkedIn', ['target' => '_blank', 'rel' => 'noopener']) . '<span class="lt-sep">·</span>' .
         html_writer::tag('span', '🇳🇬 Nigeria') . '<span class="lt-sep">·</span>' .
-        html_writer::tag('span', 'LearnTrack v2.0.0'),
+        html_writer::tag('span', 'LearnTrack v1.0.0'),
         'lt-footer'
     );
 }

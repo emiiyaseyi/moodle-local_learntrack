@@ -339,7 +339,7 @@ if (!$groupid) {
             if (empty($data)) {
                 echo '<div style="padding:32px;text-align:center;color:#9ca3af;font-family:var(--lt-font)">No data for current filters.</div>';
             } else {
-                local_learnpath_render_summary($data, $sortcol, $sortdir, $groupid, $view);
+                local_learnpath_render_summary($data, $sortcol, $sortdir, $groupid, $view, $page, $perpage);
             }
         }
     }
@@ -348,7 +348,7 @@ echo '</div>'; // lt-card
 
 echo '<div class="lt-footer"><span>© Michael Adeniran</span><span class="lt-sep">·</span>'
     . html_writer::link('https://www.linkedin.com/in/michaeladeniran','LinkedIn',['target'=>'_blank'])
-    . '<span class="lt-sep">·</span><span>LearnTrack v2.0.0</span></div>';
+    . '<span class="lt-sep">·</span><span>LearnTrack v1.0.0</span></div>';
 
 // Modal for profile popup
 echo '<div id="lt-modal" class="lt-modal-overlay">';
@@ -486,6 +486,27 @@ function local_learnpath_render_comparison(int $groupid, int $viewerid, string $
         echo '</tr>';
     }
     echo '</tbody></table></div>';
+
+    // Pagination nav
+    $total_pages = (int)ceil($total / max(1, $perpage));
+    if ($total_pages > 1) {
+        $base_url = new moodle_url('/local/learnpath/index.php', ['groupid'=>$gid,'view'=>$view,'perpage'=>$perpage]);
+        echo '<div style="display:flex;align-items:center;justify-content:center;gap:6px;padding:14px;flex-wrap:wrap;font-family:var(--lt-font);font-size:.84rem">';
+        if ($page > 0) {
+            $base_url->param('page', $page - 1);
+            echo html_writer::link($base_url, '← Prev', ['style'=>'padding:5px 12px;border:1.5px solid #e5e7eb;border-radius:8px;text-decoration:none;color:#374151;background:#fff']);
+        }
+        for ($p = 0; $p < $total_pages; $p++) {
+            $base_url->param('page', $p);
+            $active = $p === $page ? 'background:var(--lt-accent);color:#fff;border-color:var(--lt-accent)' : 'background:#fff;color:#374151';
+            echo html_writer::link($base_url, (string)($p + 1), ['style'=>'padding:5px 11px;border:1.5px solid #e5e7eb;border-radius:8px;text-decoration:none;'.$active]);
+        }
+        if ($page < $total_pages - 1) {
+            $base_url->param('page', $page + 1);
+            echo html_writer::link($base_url, 'Next →', ['style'=>'padding:5px 12px;border:1.5px solid #e5e7eb;border-radius:8px;text-decoration:none;color:#374151;background:#fff']);
+        }
+        echo '</div>';
+    }
 }
 
 function local_learnpath_sort_th(string $col, string $label, string $cur, string $dir): string {
@@ -550,14 +571,36 @@ function local_learnpath_enroll_user_in_courses(int $userid, int $groupid): stri
     return 'No manual enrolment available or already enrolled.';
 }
 
-function local_learnpath_render_summary(array $data, string $sc, string $sd, int $gid, string $view): void {
+function local_learnpath_render_summary(array $data, string $sc, string $sd, int $gid, string $view, int $page = 0, int $perpage = 25): void {
     global $DB;
+
+    // Sort first, then paginate
+    if ($sc) {
+        usort($data, function($a,$b) use ($sc,$sd) {
+            $av = $a->$sc ?? ''; $bv = $b->$sc ?? '';
+            $r  = is_numeric($av) ? ($av <=> $bv) : strcasecmp((string)$av, (string)$bv);
+            return $sd === 'desc' ? -$r : $r;
+        });
+    }
+    $total = count($data);
+    $page  = max(0, min($page, (int)ceil($total / max(1, $perpage)) - 1));
+    $data  = array_slice($data, $page * $perpage, $perpage);
+
+    // Bulk-action toolbar + perpage selector
     echo '<div style="padding:10px 14px;background:#f8fafc;border-bottom:1px solid #e5e7eb;display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-family:var(--lt-font);font-size:.78rem">';
     echo '<label style="display:flex;align-items:center;gap:5px;color:#6b7280;cursor:pointer"><input type="checkbox" id="lt-select-all" onchange="ltToggleAll(this.checked)"> Select All</label>';
     echo '<button onclick="ltBulkAction(\'remind\')" style="font-size:.74rem;font-weight:700;padding:4px 10px;border-radius:6px;border:1.5px solid #e5e7eb;background:#fff;cursor:pointer;color:#374151">📢 Send Reminder</button>';
     echo '<button onclick="ltBulkAction(\'enroll\')" style="font-size:.74rem;font-weight:700;padding:4px 10px;border-radius:6px;border:1.5px solid #e5e7eb;background:#fff;cursor:pointer;color:#374151">➕ Enrol Selected</button>';
     echo '<span id="lt-bulk-count" style="color:#9ca3af"></span>';
+    echo '<span style="margin-left:auto;color:#6b7280">Showing ' . ($total === 0 ? 0 : $page*$perpage+1) . '–' . min($total, ($page+1)*$perpage) . ' of ' . $total . ' learners</span>';
+    // Per-page selector
+    echo '<select onchange="window.location=\'?groupid=' . $gid . '&view=' . $view . '&page=0&perpage=\'+this.value" style="font-family:var(--lt-font);font-size:.76rem;border:1.5px solid #e5e7eb;border-radius:6px;padding:3px 7px;background:#fff">';
+    foreach ([25=>25,50=>50,100=>100,200=>200] as $pp=>$lbl) {
+        echo '<option value="'.$pp.'"'.($perpage===$pp?' selected':'').'>'.$lbl.' / page</option>';
+    }
+    echo '</select>';
     echo '</div>';
+
     echo '<div style="overflow-x:auto"><table class="lt-data-table" id="lt-summary-table"><thead><tr>';
     echo '<th style="width:32px"></th>'; // checkbox col
     echo local_learnpath_sort_th('lastname',        'Learner',    $sc, $sd);
@@ -569,13 +612,6 @@ function local_learnpath_render_summary(array $data, string $sc, string $sd, int
     echo local_learnpath_sort_th('status_sort',      'Status', $sc, $sd);
     echo '<th>Actions</th>';
     echo '</tr></thead><tbody>';
-    if ($sc) {
-        usort($data, function($a,$b) use ($sc,$sd) {
-            $av = $a->$sc ?? ''; $bv = $b->$sc ?? '';
-            $r  = is_numeric($av) ? ($av <=> $bv) : strcasecmp((string)$av, (string)$bv);
-            return $sd === 'desc' ? -$r : $r;
-        });
-    }
     // Pre-load enrollment data for NE check (only if path has user_assign)
     $enrollment_map   = [];
     $enrolled_per_course = [];

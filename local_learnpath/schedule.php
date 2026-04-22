@@ -212,7 +212,7 @@ echo $OUTPUT->render_from_template('local_learnpath/schedule_list', [
 echo $OUTPUT->render_from_template('local_learnpath/footer', [
     'author'       => 'Michael Adeniran',
     'linkedin_url' => 'https://www.linkedin.com/in/michaeladeniran',
-    'version'      => 'v2.0.0',
+    'version'      => 'v1.0.0',
 ]);
 
 $PAGE->requires->js_call_amd('local_learnpath/learntrack_init', 'init');

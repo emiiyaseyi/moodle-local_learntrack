@@ -301,7 +301,7 @@ if ($tab === 'leaderboard') {
             }
             echo '</select>';
             if ($limit_type !== 'all') {
-                echo '<input type="number" name="limit_n" value="'.$limit_n.'" min="1" max="'.$total_count.'"'
+                echo '<input type="number" name="limit_n" value="'.$limit_n.'" min="1"'
                     . ' style="font-family:var(--lt-font);font-size:.84rem;border:1.5px solid #e5e7eb;border-radius:8px;padding:6px 10px;width:70px;background:#f9fafb">';
             }
             echo '<button type="submit" style="font-family:var(--lt-font);font-size:.82rem;font-weight:700;padding:6px 16px;border-radius:8px;border:none;background:var(--lt-accent);color:#fff;cursor:pointer">Apply</button>';

@@ -69,7 +69,7 @@ echo '<style>'
     . '</style>';
 // Hero
 echo '<div class="lt-welcome-hero"><div style="position:relative;z-index:1">';
-echo '<div style="font-family:var(--lt-font);font-size:.78rem;font-weight:700;background:rgba(255,255,255,.15);display:inline-block;padding:4px 14px;border-radius:100px;margin-bottom:14px;color:rgba(255,255,255,.9)">🎓 Moodle Local Plugin · v2.0.0</div>';
+echo '<div style="font-family:var(--lt-font);font-size:.78rem;font-weight:700;background:rgba(255,255,255,.15);display:inline-block;padding:4px 14px;border-radius:100px;margin-bottom:14px;color:rgba(255,255,255,.9)">🎓 Moodle Local Plugin · v1.0.0</div>';
 echo '<h1>LearnTrack</h1>';
 echo '<p>Track learner progress across multiple courses from a single dashboard. Export reports, schedule emails, and manage learning paths — all in one place.</p>';
 echo '<div class="lt-hero-actions">';
@@ -80,7 +80,7 @@ if ($isadmin) {
 }
 echo '</div>';
 echo '<div class="lt-hero-stats">';
-foreach ([[$gcount,'Learning Paths'],[$ccount,'Courses Tracked'],['v2.0','Plugin Version'],['4.5+','Moodle Compatible']] as [$v,$l]) {
+foreach ([[$gcount,'Learning Paths'],[$ccount,'Courses Tracked'],['v1.0','Plugin Version'],['4.5+','Moodle Compatible']] as [$v,$l]) {
     echo '<div><span class="lt-hero-stat-val">'.$v.'</span><span class="lt-hero-stat-label">'.$l.'</span></div>';
 }
 echo '</div></div></div>';
@@ -132,12 +132,12 @@ echo '<p class="lt-dev-name">Michael Adeniran</p>';
 echo '<p class="lt-dev-role">Plugin Developer · Nigeria 🇳🇬</p>';
 echo html_writer::link('https://www.linkedin.com/in/michaeladeniran','<span>💼</span> linkedin.com/in/michaeladeniran',['class'=>'lt-dev-link','target'=>'_blank']);
 echo html_writer::link('mailto:michaeladeniransnr@gmail.com','<span>✉️</span> michaeladeniransnr@gmail.com',['class'=>'lt-dev-link']);
-echo '<div class="lt-dev-link"><span>📦</span> LearnTrack v2.0.0 · GNU GPL v3 · Moodle 4.5–5.1+</div>';
+echo '<div class="lt-dev-link"><span>📦</span> LearnTrack v1.0.0 · GNU GPL v3 · Moodle 4.5–5.1+</div>';
 echo '</div>';
 
 echo '<div class="lt-footer">';
 echo '<span>© Michael Adeniran</span><span class="lt-sep">·</span>';
 echo html_writer::link('https://www.linkedin.com/in/michaeladeniran','LinkedIn',['target'=>'_blank']);
-echo '<span class="lt-sep">·</span><span>LearnTrack v2.0.0 · Moodle 4.5–5.1+</span>';
+echo '<span class="lt-sep">·</span><span>LearnTrack v1.0.0 · Moodle 4.5–5.1+</span>';
 echo '</div>';
 echo $OUTPUT->footer();

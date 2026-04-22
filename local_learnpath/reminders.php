@@ -30,6 +30,7 @@ global $DB, $OUTPUT, $USER;
 $groupid    = optional_param('groupid',    0,       PARAM_INT);
 $action     = optional_param('action',     'list',  PARAM_ALPHANUMEXT);
 $reminderid = optional_param('reminderid', 0,       PARAM_INT);
+$tab        = optional_param('tab',        'rules', PARAM_ALPHA);
 
 $group = ($groupid > 0) ? \local_learnpath\data\helper::get_group($groupid) : null;
 
@@ -176,7 +177,7 @@ if ($action === 'trigger_send' && $reminderid && confirm_sesskey()) {
         : \core\output\notification::NOTIFY_WARNING;
 
     redirect(
-        new moodle_url('/local/learnpath/reminders.php', ['groupid' => $trig_groupid]),
+        new moodle_url('/local/learnpath/reminders.php', ['groupid' => $trig_groupid, 'tab' => 'history']),
         $msg, null, $notify_type
     );
 }
@@ -261,6 +262,20 @@ echo html_writer::link(
     '+ New Rule', ['class' => 'lt-btn lt-btn-primary']
 );
 echo '</div></div></div>';
+
+// Tabs (only on list/rules view — not on add/edit/trigger forms)
+if (!in_array($action, ['add','edit','trigger'])) {
+    echo '<div style="display:flex;gap:6px;margin-bottom:16px;border-bottom:2px solid #e5e7eb;padding-bottom:0">';
+    foreach (['rules' => '📋 Rules', 'history' => '📜 Send History'] as $t => $lbl) {
+        $turl = new moodle_url('/local/learnpath/reminders.php', ['groupid'=>$groupid,'tab'=>$t]);
+        $active = $tab === $t;
+        echo html_writer::link($turl, $lbl, [
+            'style' => 'font-family:var(--lt-font);font-size:.84rem;font-weight:700;padding:8px 16px;text-decoration:none;border-radius:8px 8px 0 0;'
+                . ($active ? 'background:var(--lt-accent);color:#fff' : 'color:#374151')
+        ]);
+    }
+    echo '</div>';
+}
 
 try {
 
@@ -377,6 +392,59 @@ if ($action === 'trigger' && $reminderid) {
     );
     echo '</div></form></div></div>';
 
+// ── HISTORY TAB ──────────────────────────────────────────────────────────────
+} elseif ($tab === 'history') {
+    $dbman_h = $DB->get_manager();
+    if (!$dbman_h->table_exists(new xmldb_table('local_learnpath_reminder_log'))) {
+        echo '<p style="font-family:var(--lt-font);color:#9ca3af;padding:24px">History table not available. Run upgrade (Site Admin → Notifications).</p>';
+    } else {
+        $hist_where = $groupid > 0
+            ? "WHERE r.groupid = :gid"
+            : "";
+        $hist_params = $groupid > 0 ? ['gid' => $groupid] : [];
+        $hist_logs = $DB->get_records_sql(
+            "SELECT rl.*, r.name AS rulename, r.groupid AS rgroupid
+             FROM {local_learnpath_reminder_log} rl
+             LEFT JOIN {local_learnpath_reminders} r ON r.id=rl.reminderid
+             $hist_where
+             ORDER BY rl.timesent DESC
+             LIMIT 200",
+            $hist_params
+        );
+
+        echo '<div class="lt-card">';
+        echo '<div class="lt-card-header"><h3 class="lt-card-title">📜 Full Send History</h3>';
+        echo '<span style="font-size:.76rem;color:#9ca3af;font-family:var(--lt-font)">Last 200 sends</span></div>';
+        echo '<div class="lt-card-body" style="padding:0">';
+
+        if (empty($hist_logs)) {
+            echo '<p style="font-family:var(--lt-font);color:#9ca3af;padding:24px 18px">No send history yet.</p>';
+        } else {
+            echo '<div style="overflow-x:auto"><table class="lt-data-table"><thead><tr>';
+            foreach (['Date & Time','Rule','Channel','Status',''] as $h) { echo '<th>' . $h . '</th>'; }
+            echo '</tr></thead><tbody>';
+            foreach ($hist_logs as $log) {
+                $ch_icon = str_contains($log->channel??'', 'email') ? '✉️' : (str_contains($log->channel??'', 'inapp') ? '🔔' : '📢');
+                $st_ok   = $log->status === 'sent';
+                echo '<tr>';
+                echo '<td style="white-space:nowrap;font-size:.8rem">' . userdate($log->timesent, get_string('strftimedatetimeshort')) . '</td>';
+                echo '<td style="font-size:.82rem;font-weight:700">' . s($log->rulename ?? 'Deleted rule') . '</td>';
+                echo '<td>' . $ch_icon . ' <span style="font-size:.76rem;color:#6b7280">' . s($log->channel ?? '—') . '</span></td>';
+                echo '<td><span style="background:' . ($st_ok?'#d1fae5':'#fee2e2') . ';color:' . ($st_ok?'#065f46':'#be123c') . ';font-weight:700;padding:2px 9px;border-radius:100px;font-size:.72rem">' . ucfirst($log->status ?? '?') . '</span></td>';
+                // Link to the rule if it still exists
+                if ($log->reminderid && $log->rulename) {
+                    $rule_url = new moodle_url('/local/learnpath/reminders.php', ['groupid'=>$log->rgroupid??0,'action'=>'edit','reminderid'=>$log->reminderid]);
+                    echo '<td>' . html_writer::link($rule_url, '✏️', ['style'=>'text-decoration:none','title'=>'Edit rule']) . '</td>';
+                } else {
+                    echo '<td></td>';
+                }
+                echo '</tr>';
+            }
+            echo '</tbody></table></div>';
+        }
+        echo '</div></div>';
+    }
+
 // ── RULES LIST ───────────────────────────────────────────────────────────────
 } else {
     // Show rules for this path, or ALL rules if groupid=0
@@ -484,5 +552,5 @@ if ($action === 'trigger' && $reminderid) {
 
 echo '<div class="lt-footer"><span>© Michael Adeniran</span><span class="lt-sep">·</span>'
     . html_writer::link('https://www.linkedin.com/in/michaeladeniran', 'LinkedIn', ['target'=>'_blank'])
-    . '<span class="lt-sep">·</span><span>LearnTrack v2.0.2</span></div>';
+    . '<span class="lt-sep">·</span><span>LearnTrack v1.0.0</span></div>';
 echo $OUTPUT->footer();

@@ -275,7 +275,7 @@ echo '</div>';
 echo '<div class="lt-footer">';
 echo '<span>© Michael Adeniran</span><span class="lt-sep">·</span>';
 echo html_writer::link('https://www.linkedin.com/in/michaeladeniran', 'LinkedIn', ['target' => '_blank']);
-echo '<span class="lt-sep">·</span><span>LearnTrack v2.0.0</span>';
+echo '<span class="lt-sep">·</span><span>LearnTrack v1.0.0</span>';
 echo '</div>';
 
 // ── SEARCH JS ─────────────────────────────────────────────────────────────────

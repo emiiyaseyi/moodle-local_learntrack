@@ -68,6 +68,13 @@ if ($hassiteconfig) {
         'local/learnpath:manage'
     ));
 
+    $ADMIN->add('local_learnpath_category', new admin_externalpage(
+        'local_learnpath_managers',
+        'Managers & Access',
+        new moodle_url('/local/learnpath/managers.php'),
+        'local/learnpath:manage'
+    ));
+
     // Settings page — key MUST be 'local_learnpath' (matches plugin component)
     // This is what Moodle's plugin manager links to from the plugins list
     $settings = new admin_settingpage('local_learnpath', get_string('pluginname', 'local_learnpath') . ' Settings');

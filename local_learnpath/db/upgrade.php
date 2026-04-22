@@ -446,5 +446,13 @@ function xmldb_local_learnpath_upgrade(int $oldversion): bool {
         upgrade_plugin_savepoint(true, 2026050103, 'local', 'learnpath');
     }
 
+    if ($oldversion < 2026050104) {
+        // v1.0.0 (2026050104): Pagination in dashboard summary view, reminder history tab,
+        // redirect to history after Send Now, managers.php admin assignment page,
+        // leaderboard max-validation fix, version string cleanup across all pages.
+        // No DB schema changes.
+        upgrade_plugin_savepoint(true, 2026050104, 'local', 'learnpath');
+    }
+
     return true;
 }

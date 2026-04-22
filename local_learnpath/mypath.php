@@ -201,7 +201,7 @@ if (empty($my_groups)) {
     }
 }
 
-echo '<div class="lt-footer"><span>© Michael Adeniran</span><span class="lt-sep">·</span>' . html_writer::link('https://www.linkedin.com/in/michaeladeniran','LinkedIn',['target'=>'_blank']) . '<span class="lt-sep">·</span><span>LearnTrack v2.0.0</span></div>';
+echo '<div class="lt-footer"><span>© Michael Adeniran</span><span class="lt-sep">·</span>' . html_writer::link('https://www.linkedin.com/in/michaeladeniran','LinkedIn',['target'=>'_blank']) . '<span class="lt-sep">·</span><span>LearnTrack v1.0.0</span></div>';
 } catch (\Throwable $e) {
     echo '<div style="margin:20px;padding:16px;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;font-family:system-ui"><strong>Error:</strong> ' . htmlspecialchars($e->getMessage()) . '<br><small>' . htmlspecialchars($e->getFile()) . ':' . $e->getLine() . '</small></div>';
 }

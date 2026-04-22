@@ -139,7 +139,7 @@ echo $OUTPUT->render_from_template('local_learnpath/email_page', [
 echo $OUTPUT->render_from_template('local_learnpath/footer', [
     'author'        => 'Michael Adeniran',
     'linkedin_url'  => 'https://www.linkedin.com/in/michaeladeniran',
-    'version'       => 'v2.0.0',
+    'version'       => 'v1.0.0',
 ]);
 
 // AMD init
