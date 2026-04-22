@@ -438,5 +438,13 @@ function xmldb_local_learnpath_upgrade(int $oldversion): bool {
         upgrade_plugin_savepoint(true, 2026050102, 'local', 'learnpath');
     }
 
+    if ($oldversion < 2026050103) {
+        // v1.0.0 (2026050103): Cert preview live updates (window.ltCPrev), leaderboard
+        // top/bottom/all filter, auto-seed placeholder badges & criteria, cert ID format
+        // setting (cert_id_prefix, cert_id_format) wired into profile.php.
+        // No DB schema changes.
+        upgrade_plugin_savepoint(true, 2026050103, 'local', 'learnpath');
+    }
+
     return true;
 }

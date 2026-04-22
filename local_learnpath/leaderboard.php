@@ -42,6 +42,44 @@ $tables_ready = $dbman->table_exists(new xmldb_table('local_learnpath_badges'))
              && $dbman->table_exists(new xmldb_table('local_learnpath_points'))
              && $dbman->table_exists(new xmldb_table('local_learnpath_user_badges'));
 
+// ── Auto-seed placeholder badges and criteria when tables are empty ───────────
+if ($tables_ready && $isadmin) {
+    if ($DB->count_records('local_learnpath_badges') === 0) {
+        $default_badges = [
+            ['icon'=>'🌱','name'=>'First Steps',      'description'=>'Completed your first activity',          'points_req'=>10,  'sortorder'=>1],
+            ['icon'=>'📚','name'=>'Bookworm',          'description'=>'Read through 5 course resources',        'points_req'=>25,  'sortorder'=>2],
+            ['icon'=>'🎯','name'=>'On Target',         'description'=>'Scored above 70% on an assessment',      'points_req'=>50,  'sortorder'=>3],
+            ['icon'=>'⭐','name'=>'Rising Star',       'description'=>'Earned 100 points in a learning path',   'points_req'=>100, 'sortorder'=>4],
+            ['icon'=>'🔥','name'=>'Hot Streak',        'description'=>'Logged in 5 days in a row',              'points_req'=>150, 'sortorder'=>5],
+            ['icon'=>'💎','name'=>'Diamond Learner',   'description'=>'Completed all activities in a course',   'points_req'=>200, 'sortorder'=>6],
+            ['icon'=>'🏅','name'=>'Course Champion',   'description'=>'Topped the leaderboard for a path',      'points_req'=>300, 'sortorder'=>7],
+            ['icon'=>'🎓','name'=>'Graduate',          'description'=>'Completed a full learning path',         'points_req'=>400, 'sortorder'=>8],
+            ['icon'=>'🦅','name'=>'Eagle Scout',       'description'=>'Achieved 500+ points across all paths',  'points_req'=>500, 'sortorder'=>9],
+            ['icon'=>'🏆','name'=>'Path Master',       'description'=>'Mastered every course in every path',    'points_req'=>750, 'sortorder'=>10],
+        ];
+        foreach ($default_badges as $b) {
+            $DB->insert_record('local_learnpath_badges', (object)array_merge($b, ['timecreated'=>time()]));
+        }
+    }
+    if ($DB->count_records('local_learnpath_criteria') === 0) {
+        $default_criteria = [
+            ['name'=>'Course Completed',    'description'=>'Learner finishes all activities in a course', 'points'=>50,  'event_type'=>'course_complete',   'enabled'=>1,'sortorder'=>1],
+            ['name'=>'Path Completed',      'description'=>'Learner completes the full learning path',    'points'=>200, 'event_type'=>'path_complete',     'enabled'=>1,'sortorder'=>2],
+            ['name'=>'First Login',         'description'=>'Learner logs in for the first time',          'points'=>5,   'event_type'=>'first_login',       'enabled'=>1,'sortorder'=>3],
+            ['name'=>'Daily Login',         'description'=>'Learner logs in on a given day',              'points'=>2,   'event_type'=>'daily_login',       'enabled'=>1,'sortorder'=>4],
+            ['name'=>'Perfect Quiz Score',  'description'=>'Scores 100% on a quiz or test',               'points'=>25,  'event_type'=>'quiz_passed',       'enabled'=>1,'sortorder'=>5],
+            ['name'=>'Early Completion',    'description'=>'Finishes a course ahead of schedule',         'points'=>10,  'event_type'=>'early_completion',  'enabled'=>1,'sortorder'=>6],
+            ['name'=>'Forum Contribution',  'description'=>'Posts a helpful reply in a discussion forum', 'points'=>15,  'event_type'=>'forum_post',        'enabled'=>1,'sortorder'=>7],
+            ['name'=>'Video Completed',     'description'=>'Watches a full video lesson',                 'points'=>8,   'event_type'=>'video_complete',    'enabled'=>1,'sortorder'=>8],
+            ['name'=>'Assignment Submitted','description'=>'Submits an assignment on time',               'points'=>12,  'event_type'=>'assignment_submit', 'enabled'=>1,'sortorder'=>9],
+            ['name'=>'Weekly Streak',       'description'=>'Active every day for a full week',            'points'=>20,  'event_type'=>'weekly_streak',     'enabled'=>1,'sortorder'=>10],
+        ];
+        foreach ($default_criteria as $c) {
+            $DB->insert_record('local_learnpath_criteria', (object)array_merge($c, ['timecreated'=>time()]));
+        }
+    }
+}
+
 // ── Admin actions — only run when an action is actually being performed ────────
 if ($isadmin && $tables_ready && $action !== '' && confirm_sesskey()) {
 
@@ -129,7 +167,9 @@ if ($isadmin && $tables_ready && $action !== '' && confirm_sesskey()) {
     }
 }
 
-$tab = optional_param('tab', 'leaderboard', PARAM_ALPHA);
+$tab        = optional_param('tab',        'leaderboard', PARAM_ALPHA);
+$limit_type = optional_param('limit_type', 'top',         PARAM_ALPHA);   // top|bottom|all
+$limit_n    = optional_param('limit_n',    10,            PARAM_INT);
 $groups = DH::get_groups();
 
 echo $OUTPUT->header();
@@ -237,6 +277,36 @@ if ($tab === 'leaderboard') {
                 ];
             }
             usort($rankings, fn($a,$b) => $b->points <=> $a->points ?: $b->progress <=> $a->progress);
+
+            // Apply top/bottom/all filter
+            $total_count = count($rankings);
+            $safe_n = max(1, min($limit_n, $total_count));
+            if ($limit_type === 'bottom') {
+                $rankings = array_slice($rankings, max(0, $total_count - $safe_n));
+                $rankings = array_reverse($rankings);
+            } elseif ($limit_type !== 'all') {
+                $rankings = array_slice($rankings, 0, $safe_n);
+            }
+
+            // Filter selector UI
+            $furl = (new moodle_url('/local/learnpath/leaderboard.php', ['groupid'=>$groupid,'tab'=>'leaderboard']))->out(false);
+            echo '<form method="get" action="'.s($furl).'" style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">';
+            echo '<input type="hidden" name="groupid" value="'.$groupid.'">';
+            echo '<input type="hidden" name="tab" value="leaderboard">';
+            echo '<label style="font-family:var(--lt-font);font-size:.82rem;font-weight:700;color:#374151">Show:</label>';
+            $lt_opts = ['top'=>'Top','bottom'=>'Bottom','all'=>'All'];
+            echo '<select name="limit_type" style="font-family:var(--lt-font);font-size:.84rem;border:1.5px solid #e5e7eb;border-radius:8px;padding:6px 10px;background:#f9fafb" onchange="this.form.submit()">';
+            foreach ($lt_opts as $lv => $ll) {
+                echo '<option value="'.$lv.'"'.($limit_type===$lv?' selected':'').'>'.$ll.'</option>';
+            }
+            echo '</select>';
+            if ($limit_type !== 'all') {
+                echo '<input type="number" name="limit_n" value="'.$limit_n.'" min="1" max="'.$total_count.'"'
+                    . ' style="font-family:var(--lt-font);font-size:.84rem;border:1.5px solid #e5e7eb;border-radius:8px;padding:6px 10px;width:70px;background:#f9fafb">';
+            }
+            echo '<button type="submit" style="font-family:var(--lt-font);font-size:.82rem;font-weight:700;padding:6px 16px;border-radius:8px;border:none;background:var(--lt-accent);color:#fff;cursor:pointer">Apply</button>';
+            echo '<span style="font-family:var(--lt-font);font-size:.76rem;color:#9ca3af">'.$total_count.' learner'.($total_count!==1?'s':'').' total</span>';
+            echo '</form>';
 
             $medals = ['🥇','🥈','🥉'];
             echo '<div class="lt-card">';
@@ -403,7 +473,7 @@ if ($tab === 'criteria' && $isadmin) {
 
 echo '<div class="lt-footer"><span>© Michael Adeniran</span><span class="lt-sep">·</span>'
     .html_writer::link('https://www.linkedin.com/in/michaeladeniran','LinkedIn',['target'=>'_blank'])
-    .'<span class="lt-sep">·</span><span>LearnTrack v2.0.0</span></div>';
+    .'<span class="lt-sep">·</span><span>LearnTrack v1.0.0</span></div>';
 } catch (\Throwable $e) {
     echo '<div style="margin:20px;padding:16px;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;font-family:system-ui"><strong>Error:</strong> ' . htmlspecialchars($e->getMessage()) . '<br><small>' . htmlspecialchars($e->getFile()) . ':' . $e->getLine() . '</small></div>';
 }

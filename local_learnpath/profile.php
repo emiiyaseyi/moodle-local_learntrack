@@ -70,13 +70,25 @@ if ($isadmin) {
         if (optional_param('issuecert', 0, PARAM_INT)) {
             $certn = trim(optional_param('certnumber', '', PARAM_TEXT));
             if ($certn === '') {
-                // Auto-generate: SITE-PATHCODE-MMYYYY-USERID
-                $sitename  = strtoupper(substr(preg_replace('/[^a-zA-Z0-9]/', '', get_config('moodle', 'shortname') ?: 'LMS'), 0, 4));
-                $pathcode  = strtoupper(substr(preg_replace('/[^a-zA-Z0-9]/', '', $group ? $group->name : 'PATH'), 0, 6));
-                $datecode  = date('mY');
-                $uid_part  = str_pad($userid, 4, '0', STR_PAD_LEFT);
-                $certn     = $sitename . '-' . $pathcode . '-' . $datecode . '-' . $uid_part;
-                // Ensure uniqueness - append random suffix if collision
+                // Auto-generate based on admin settings
+                $cfg_prefix = get_config('local_learnpath', 'cert_id_prefix');
+                $cfg_format = get_config('local_learnpath', 'cert_id_format') ?: 'site-path-date-uid';
+                $sitename   = $cfg_prefix
+                    ? strtoupper(preg_replace('/[^A-Z0-9]/i', '', $cfg_prefix))
+                    : strtoupper(substr(preg_replace('/[^a-zA-Z0-9]/', '', get_config('moodle', 'shortname') ?: 'LMS'), 0, 4));
+                $pathcode   = strtoupper(substr(preg_replace('/[^a-zA-Z0-9]/', '', $group ? $group->name : 'PATH'), 0, 6));
+                $datecode   = date('mY');
+                $uid_part   = str_pad($userid, 4, '0', STR_PAD_LEFT);
+                if ($cfg_format === 'prefix-uid') {
+                    $certn = $sitename . '-' . $uid_part;
+                } elseif ($cfg_format === 'prefix-date-uid') {
+                    $certn = $sitename . '-' . $datecode . '-' . $uid_part;
+                } elseif ($cfg_format === 'prefix-random') {
+                    $certn = $sitename . '-' . strtoupper(substr(md5(uniqid('', true)), 0, 8));
+                } else {
+                    $certn = $sitename . '-' . $pathcode . '-' . $datecode . '-' . $uid_part;
+                }
+                // Ensure uniqueness
                 if ($DB->record_exists('local_learnpath_certs', ['certnumber' => $certn])) {
                     $certn .= '-' . strtoupper(substr(md5(uniqid()), 0, 4));
                 }

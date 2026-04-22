@@ -202,6 +202,31 @@ if ($hassiteconfig) {
         'Hi {firstname},\n\nYou have been added to the learning path "{groupname}" and enrolled in {count} course(s).\n\nLog in to start learning: {url}\n\nLearnTrack'
     ));
 
+    // ── Certificate ID ────────────────────────────────────────────────────────
+    $settings->add(new admin_setting_heading(
+        'local_learnpath/cert_id_hdr', 'Certificate ID', ''
+    ));
+
+    $settings->add(new admin_setting_configtext(
+        'local_learnpath/cert_id_prefix',
+        'Certificate ID prefix',
+        'Custom prefix used at the start of auto-generated certificate IDs. Leave blank to use the site short name (e.g. LMS).',
+        ''
+    ));
+
+    $settings->add(new admin_setting_configselect(
+        'local_learnpath/cert_id_format',
+        'Certificate ID format',
+        'How auto-generated certificate IDs are structured.',
+        'site-path-date-uid',
+        [
+            'site-path-date-uid' => 'PREFIX-PATHCODE-MMYYYY-USERID (default)',
+            'prefix-uid'         => 'PREFIX-USERID only',
+            'prefix-date-uid'    => 'PREFIX-MMYYYY-USERID',
+            'prefix-random'      => 'PREFIX-RANDOM8',
+        ]
+    ));
+
     // ── Branding (quick colour setting) ───────────────────────────────────────
     $settings->add(new admin_setting_heading(
         'local_learnpath/branding_hdr',

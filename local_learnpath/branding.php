@@ -206,6 +206,7 @@ $ch .= '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;font-fam
 foreach ([['cert_bg_color','ltc-bg','Background Colour',$cbg],['cert_border_color','ltc-brd','Border Colour',$cbrd]] as [$n,$id,$lbl,$v]) {
     $ch .= '<div><label style="font-size:.74rem;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:5px">' . $lbl . '</label>'
         . '<input type="color" name="' . $n . '" id="' . $id . '" value="' . s($v) . '"'
+        . ' oninput="if(window.ltCPrev)window.ltCPrev()" onchange="if(window.ltCPrev)window.ltCPrev()"'
         . ' style="width:44px;height:34px;border:1.5px solid #e5e7eb;border-radius:6px;padding:2px;cursor:pointer"></div>';
 }
 $ch .= '</div>';
@@ -259,7 +260,7 @@ $ch .= '</div></div>';
 // Logo position selector
 $ch .= '<div style="margin-top:8px">';
 $ch .= '<label style="font-size:.74rem;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:5px">Logo Position on Certificate</label>';
-$ch .= '<select name="cert_logo_pos" id="ltc-logo-pos" onchange="ltCPrev()" style="font-family:var(--lt-font);font-size:.84rem;border:1.5px solid #e5e7eb;border-radius:8px;padding:7px 10px;background:#f9fafb;width:100%;max-width:260px">';
+$ch .= '<select name="cert_logo_pos" id="ltc-logo-pos" onchange="if(window.ltCPrev)window.ltCPrev()" style="font-family:var(--lt-font);font-size:.84rem;border:1.5px solid #e5e7eb;border-radius:8px;padding:7px 10px;background:#f9fafb;width:100%;max-width:260px">';
 foreach ($pos_opts as $pv => $pl) {
     $ch .= '<option value="' . $pv . '"' . ($cert_pos === $pv ? ' selected' : '') . '>' . $pl . '</option>';
 }
@@ -290,7 +291,7 @@ $jsd = json_encode(['bg'=>$cbg,'brd'=>$cbrd,'brs'=>$cbrs,'tf'=>$ctf,'bf'=>$cbf,
     'pathName'=>$_preview_path,'courseList'=>$_preview_course_list]);
 // Inject cert preview JS via $PAGE->requires->js_init_code() — CSP-safe with Moodle 4.5+
 $cert_js  = 'var LTC=' . $jsd . ';';
-$cert_js .= 'function ltCPrev(){';
+$cert_js .= 'window.ltCPrev=function(){';
 $cert_js .= '  var gv=function(id){var e=document.getElementById(id);return e?e.value:""};';
 $cert_js .= '  var gn=function(n){var e=document.querySelector("[name=\""+n+"\"]");return e?e.value:""};';
 $cert_js .= '  var bg=gv("ltc-bg")||LTC.bg,brd=gv("ltc-brd")||LTC.brd,brs=gv("ltc-brs")||LTC.brs;';
@@ -325,12 +326,12 @@ $cert_js .= '   +"<div style=\'text-align:center\'><div style=\'border-top:1.5px
 $cert_js .= '   +"</div>"';
 $cert_js .= '   +"<div style=\'font-size:.48rem;color:#aaa;margin-top:10px;font-family:"+bf+"\'>"+foot+"</div>"';
 $cert_js .= '   +"</div></div>";';
-$cert_js .= '}';
-$cert_js .= 'document.querySelectorAll("#ltc-bg,#ltc-brd,#ltc-brs,#ltc-tf,#ltc-bf").forEach(function(e){';
-$cert_js .= '  e.addEventListener("input",ltCPrev);e.addEventListener("change",ltCPrev);';
+$cert_js .= '};';
+$cert_js .= 'document.querySelectorAll("#ltc-bg,#ltc-brd,#ltc-brs,#ltc-tf,#ltc-bf,#ltc-logo-pos").forEach(function(e){';
+$cert_js .= '  e.addEventListener("input",window.ltCPrev);e.addEventListener("change",window.ltCPrev);';
 $cert_js .= '});';
 $cert_js .= 'document.querySelectorAll(\'[name="cert_org_name"],[name="cert_signatory_title"],[name="cert_footer_text"]\').forEach(function(e){';
-$cert_js .= '  e.addEventListener("input",ltCPrev);';
+$cert_js .= '  e.addEventListener("input",window.ltCPrev);e.addEventListener("change",window.ltCPrev);';
 $cert_js .= '});';
 $cert_js .= 'var _lfi=document.getElementById("lt-logo-file");';
 $cert_js .= 'if(_lfi){_lfi.addEventListener("change",function(){';
@@ -341,9 +342,9 @@ $cert_js .= '  st.textContent="Uploading...";st.style.color="#6b7280";';
 $cert_js .= '  fetch(LTC.uploadUrl,{method:"POST",body:fd}).then(function(r){return r.json();})';
 $cert_js .= '  .then(function(d){if(d.ok){st.textContent="Uploaded ✓";st.style.color="#10b981";';
 $cert_js .= '  document.getElementById("lt-logo-thumb").innerHTML="<img src=\'"+d.url+"\' style=\'max-width:100%;max-height:100%;object-fit:contain\'>";';
-$cert_js .= '  LTC.logo=d.url;ltCPrev();}else{st.textContent=d.error||"Failed";st.style.color="#be123c";}});';
+$cert_js .= '  LTC.logo=d.url;window.ltCPrev();}else{st.textContent=d.error||"Failed";st.style.color="#be123c";}});';
 $cert_js .= '});}';
-$cert_js .= 'ltCPrev();';
+$cert_js .= 'window.ltCPrev();';
 $PAGE->requires->js_init_code($cert_js);
 
 local_learnpath_cert_card('Certificate Design', $ch);
@@ -362,5 +363,5 @@ echo html_writer::link(new moodle_url('/local/learnpath/welcome.php'),'Cancel',[
 echo '</div></form>';
 echo '<div class="lt-footer"><span>&#169; Michael Adeniran</span><span class="lt-sep">&#183;</span>'
     . html_writer::link('https://www.linkedin.com/in/michaeladeniran','LinkedIn',['target'=>'_blank'])
-    . '<span class="lt-sep">&#183;</span><span>LearnTrack v2.0.2</span></div>';
+    . '<span class="lt-sep">&#183;</span><span>LearnTrack v1.0.0</span></div>';
 echo $OUTPUT->footer();
