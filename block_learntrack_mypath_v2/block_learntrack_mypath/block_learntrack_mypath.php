@@ -247,20 +247,22 @@ class block_learntrack_mypath extends block_base {
 
         $h .= '</div><!-- /blk -->';
 
-        // Layout switcher JS
-        $h .= '<script>(function(){'
-            . 'var K="'.$prefKey.'",B="'.$bid.'",Ls=["cards","list","min"];'
-            . 'window.ltrkLay=function(bid,lay){'
-            .   'var bl=document.getElementById(bid);if(!bl)return;'
-            .   'bl.querySelectorAll(".ltrk-lv").forEach(function(el){'
-            .     'el.style.display=el.classList.contains("lv-"+lay)?"":"none";});'
-            .   'bl.querySelectorAll(".blk-sw button").forEach(function(btn,i){'
-            .     'btn.classList.toggle("on",Ls[i]===lay);});'
-            .   'try{localStorage.setItem(K,lay);}catch(e){}};'
-            . 'document.addEventListener("DOMContentLoaded",function(){'
-            .   'var s="cards";try{s=localStorage.getItem(K)||"cards";}catch(e){}'
-            .   'ltrkLay(B,s);});'
-            . '})();</script>';
+        // Layout switcher JS — use js_init_code for Moodle 4.5+ CSP compliance
+        global $PAGE;
+        $lay_js  = '(function(){';
+        $lay_js .= 'var K=' . json_encode($prefKey) . ',B=' . json_encode($bid) . ',Ls=["cards","list","min"];';
+        $lay_js .= 'window.ltrkLay=function(bid,lay){';
+        $lay_js .=   'var bl=document.getElementById(bid);if(!bl)return;';
+        $lay_js .=   'bl.querySelectorAll(".ltrk-lv").forEach(function(el){';
+        $lay_js .=     'el.style.display=el.classList.contains("lv-"+lay)?"":"none";});';
+        $lay_js .=   'bl.querySelectorAll(".blk-sw button").forEach(function(btn,i){';
+        $lay_js .=     'btn.classList.toggle("on",Ls[i]===lay);});';
+        $lay_js .=   'try{localStorage.setItem(K,lay);}catch(e){}};';
+        $lay_js .= 'document.addEventListener("DOMContentLoaded",function(){';
+        $lay_js .=   'var s="cards";try{s=localStorage.getItem(K)||"cards";}catch(e){}';
+        $lay_js .=   'ltrkLay(B,s);});';
+        $lay_js .= '})();';
+        $PAGE->requires->js_init_code($lay_js);
 
         $this->content->text = $h;
         return $this->content;

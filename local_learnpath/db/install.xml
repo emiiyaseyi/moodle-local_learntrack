@@ -283,7 +283,7 @@
         <FIELD NAME="invitedby"   TYPE="int"  LENGTH="10"  NOTNULL="true"/>
         <FIELD NAME="status"      TYPE="char" LENGTH="20"  NOTNULL="true" DEFAULT="pending"/>
         <FIELD NAME="timecreated" TYPE="int"  LENGTH="10"  NOTNULL="true"/>
-        <FIELD NAME="timeaccepted"TYPE="int"  LENGTH="10"  NOTNULL="false"/>
+        <FIELD NAME="timeaccepted" TYPE="int"  LENGTH="10"  NOTNULL="false"/>
       </FIELDS>
       <KEYS>
         <KEY NAME="primary"  TYPE="primary" FIELDS="id"/>
