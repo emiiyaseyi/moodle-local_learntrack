@@ -454,5 +454,13 @@ function xmldb_local_learnpath_upgrade(int $oldversion): bool {
         upgrade_plugin_savepoint(true, 2026050104, 'local', 'learnpath');
     }
 
+    if ($oldversion < 2026050105) {
+        // v1.0.0 (2026050105): Fix block showing paths to learners not assigned to them.
+        // Block now checks local_learnpath_user_assign first; only falls back to course
+        // enrollment for paths with no explicit assignments (backwards-compat).
+        // No DB schema changes.
+        upgrade_plugin_savepoint(true, 2026050105, 'local', 'learnpath');
+    }
+
     return true;
 }

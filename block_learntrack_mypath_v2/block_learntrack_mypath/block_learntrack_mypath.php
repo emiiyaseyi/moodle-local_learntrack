@@ -31,18 +31,36 @@ class block_learntrack_mypath extends block_base {
         $g   = hexdec(substr($hex,2,2));
         $b   = hexdec(substr($hex,4,2));
 
-        // Collect paths
-        $groups  = $DB->get_records('local_learnpath_groups',null,'name ASC');
+        // Collect paths the current user belongs to
+        $groups  = $DB->get_records('local_learnpath_groups', null, 'name ASC');
         $myGrps  = [];
+        $dbman_b = $DB->get_manager();
+        $has_assign_tbl = $dbman_b->table_exists(new xmldb_table('local_learnpath_user_assign'));
+
         foreach ($groups as $grp) {
-            if ($isAdmin||$isMgr) {
-                if ($DB->record_exists('local_learnpath_managers',['groupid'=>$grp->id,'userid'=>$USER->id])) {
-                    $myGrps[$grp->id]=$grp; continue;
+            // Site admins see every path
+            if ($isAdmin) { $myGrps[$grp->id] = $grp; continue; }
+
+            // Path managers see only the paths they manage
+            if ($isMgr && $DB->record_exists('local_learnpath_managers', ['groupid'=>$grp->id,'userid'=>$USER->id])) {
+                $myGrps[$grp->id] = $grp; continue;
+            }
+
+            // Regular learners: must be explicitly assigned via local_learnpath_user_assign
+            if ($has_assign_tbl) {
+                if ($DB->record_exists('local_learnpath_user_assign', ['groupid'=>$grp->id,'userid'=>$USER->id])) {
+                    $myGrps[$grp->id] = $grp; continue;
+                }
+                // If this path uses explicit assignment at all, skip learners not in it
+                if ($DB->record_exists('local_learnpath_user_assign', ['groupid'=>$grp->id])) {
+                    continue;
                 }
             }
+
+            // Fallback (backwards-compat): path has no explicit assignments — use course enrollment
             foreach (\local_learnpath\data\helper::get_group_courses($grp->id) as $crs) {
-                $cx=context_course::instance($crs->id,IGNORE_MISSING);
-                if ($cx&&is_enrolled($cx,$USER->id)) { $myGrps[$grp->id]=$grp; break; }
+                $cx = context_course::instance($crs->id, IGNORE_MISSING);
+                if ($cx && is_enrolled($cx, $USER->id)) { $myGrps[$grp->id] = $grp; break; }
             }
         }
 
