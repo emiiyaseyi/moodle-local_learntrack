@@ -44,6 +44,16 @@ class group_form extends \moodleform {
         $mform->setType('categoryid', PARAM_INT);
         $mform->hideIf('categoryid', 'grouptype', 'neq', 'category');
 
+        // Category auto-sync option
+        $mform->addElement('advcheckbox', 'auto_sync_courses',
+            'Auto-sync courses from category',
+            'When enabled, saving this path will update its course list to match the current category contents. Uncheck to keep the existing courses even if the category changes.',
+            [], [0, 1]
+        );
+        $mform->setType('auto_sync_courses', PARAM_INT);
+        $mform->setDefault('auto_sync_courses', 1);
+        $mform->hideIf('auto_sync_courses', 'grouptype', 'neq', 'category');
+
         // Cohort selector
         $cohorts = $DB->get_records_menu('cohort', null, 'name ASC', 'id, name');
         $cohorts = ['' => get_string('choosedots')] + $cohorts;
@@ -62,16 +72,35 @@ class group_form extends \moodleform {
         $mform->hideIf('courseids', 'grouptype', 'neq', 'manual');
 
         // ── Manual participant selection ──────────────────────────────────────────
-        // Always visible — allows restricting who is tracked regardless of group type.
-        // Uses autocomplete multi-select with PARAM_RAW (MDL-71831).
-        $mform->addElement('header', 'participants_header', 'Manual Participant Selection (Optional)');
+        $mform->addElement('header', 'participants_header', 'Participant Selection (Optional)');
         $mform->addElement('static', 'participants_desc', '',
-            '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 14px;font-size:.86rem;color:#1e40af;margin-bottom:8px">'
-            . '<strong>Optional:</strong> Search and select specific learners to track in this path. '
-            . 'If left empty, all enrolled users from the selected courses/category/cohort will be tracked. '
-            . 'Selecting users here limits tracking to only those users.'
+            '<div style="background:var(--lt-primary-pale,#eef4fb);border:1px solid rgba(30,58,95,.2);border-radius:8px;padding:10px 14px;font-size:.86rem;color:var(--lt-accent,#1e3a5f);margin-bottom:8px">'
+            . '<strong>Optional:</strong> Restrict tracking to specific learners. You can add individual users or entire cohorts. '
+            . 'If left empty, all enrolled users from the selected courses/category/cohort will be tracked.'
             . '</div>'
         );
+
+        // ── Cohort-based participant selection ────────────────────────────────────
+        $all_cohorts = $DB->get_records('cohort', null, 'name ASC', 'id, name, idnumber');
+        if (!empty($all_cohorts)) {
+            $cohort_opts = [];
+            foreach ($all_cohorts as $co) {
+                $label = $co->name;
+                if ($co->idnumber) $label .= ' [' . $co->idnumber . ']';
+                $cohort_opts[$co->id] = $label;
+            }
+            $mform->addElement('autocomplete', 'participant_cohortids',
+                'Add Cohort(s)', $cohort_opts, [
+                    'multiple'          => true,
+                    'noselectionstring' => 'Select one or more cohorts to add their members…',
+                    'tags'              => false,
+                ]
+            );
+            $mform->setType('participant_cohortids', PARAM_RAW);
+            $mform->addElement('static', 'cohort_note', '',
+                '<div style="font-size:.78rem;color:#6b7280;margin-top:-4px;margin-bottom:10px">All members of the selected cohort(s) will be added as participants. Existing participants are preserved.</div>'
+            );
+        }
 
         // User autocomplete — limited by admin-configured cap (max 500)
         $useropts = [];

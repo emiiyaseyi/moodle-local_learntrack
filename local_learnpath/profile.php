@@ -119,6 +119,7 @@ $bname = get_config('local_learnpath', 'brand_name')  ?: 'LearnTrack';
 $PAGE->set_title(fullname($learner) . ' — ' . $bname);
 
 echo $OUTPUT->header();
+echo local_learnpath_brand_css();
 try {
 
 // ── Data (all DB/DH calls AFTER header so errors show cleanly) ──────────────

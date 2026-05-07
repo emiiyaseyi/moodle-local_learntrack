@@ -28,7 +28,7 @@ require_login();
 $ctx = context_system::instance();
 require_capability('local/learnpath:manage', $ctx);
 
-$action  = optional_param('action',  'list', PARAM_ALPHA);
+$action  = optional_param('action',  'list', PARAM_ALPHANUMEXT); // ALPHANUMEXT preserves underscores
 $groupid = optional_param('groupid', 0,      PARAM_INT);
 $debug   = optional_param('debug',   0,      PARAM_INT);
 
@@ -45,6 +45,15 @@ $PAGE->set_heading(get_string('pluginname', 'local_learnpath'));
 global $DB, $USER, $OUTPUT;
 
 // ── DELETE ────────────────────────────────────────────────────────────────────
+if ($action === 'set_manager_scope' && $groupid > 0 && confirm_sesskey()) {
+    $scope_uid   = required_param('userid', PARAM_INT);
+    $new_scope   = optional_param('scope', 'view', PARAM_ALPHANUMEXT);
+    $allowed_scopes = ['view', 'view_remind', 'full'];
+    if (!in_array($new_scope, $allowed_scopes)) { $new_scope = 'view'; }
+    $DB->set_field('local_learnpath_managers', 'scope', $new_scope, ['groupid' => $groupid, 'userid' => $scope_uid]);
+    redirect(new moodle_url('/local/learnpath/manage.php'), 'Manager permissions updated.', null, \core\output\notification::NOTIFY_SUCCESS);
+}
+
 if ($action === 'revoke_manager' && $groupid > 0 && confirm_sesskey()) {
     $revoke_uid = required_param('userid', PARAM_INT);
     $DB->delete_records('local_learnpath_managers', ['groupid' => $groupid, 'userid' => $revoke_uid]);
@@ -91,6 +100,10 @@ if ($action === 'add' || ($action === 'edit' && $groupid > 0)) {
         $formdata->manager_userids = implode(', ',
             $DB->get_fieldset_select('local_learnpath_managers', 'userid', 'groupid = ?', [$groupid])
         );
+        // Default auto_sync to 1 if field doesn't exist on old records
+        if (!isset($formdata->auto_sync_courses)) {
+            $formdata->auto_sync_courses = 1;
+        }
     }
 
     // THE FIX: pass $PAGE->url (moodle_url object) — converts action+groupid to hidden fields
@@ -118,21 +131,28 @@ if ($action === 'add' || ($action === 'edit' && $groupid > 0)) {
             );
         }
 
+        $auto_sync = (int)($data->auto_sync_courses ?? 1);
+
         if (!empty($data->id)) {
             // UPDATE
             $DB->update_record('local_learnpath_groups', (object)[
-                'id'           => (int)$data->id,
-                'name'         => trim($data->name),
-                'description'  => (string)($data->description ?? ''),
-                'grouptype'    => $data->grouptype,
-                'categoryid'   => !empty($data->categoryid) ? (int)$data->categoryid : null,
-                'cohortid'     => !empty($data->cohortid)   ? (int)$data->cohortid   : null,
-                'deadline'     => !empty($data->deadline)   ? (int)$data->deadline   : null,
-                'adminnotes'   => (string)($data->adminnotes ?? ''),
-                'timemodified' => $now,
+                'id'               => (int)$data->id,
+                'name'             => trim($data->name),
+                'description'      => (string)($data->description ?? ''),
+                'grouptype'        => $data->grouptype,
+                'categoryid'       => !empty($data->categoryid) ? (int)$data->categoryid : null,
+                'cohortid'         => !empty($data->cohortid)   ? (int)$data->cohortid   : null,
+                'deadline'         => !empty($data->deadline)   ? (int)$data->deadline   : null,
+                'adminnotes'       => (string)($data->adminnotes ?? ''),
+                'auto_sync_courses'=> $auto_sync,
+                'timemodified'     => $now,
             ]);
             $savedid = (int)$data->id;
-            $DB->delete_records('local_learnpath_group_courses', ['groupid' => $savedid]);
+            // For category-type paths with sync disabled, keep existing course list
+            $skip_course_refresh = ($data->grouptype === 'category' && $auto_sync === 0);
+            if (!$skip_course_refresh) {
+                $DB->delete_records('local_learnpath_group_courses', ['groupid' => $savedid]);
+            }
         } else {
             // INSERT — capture returned ID
             $savedid = (int)$DB->insert_record('local_learnpath_groups', (object)[
@@ -169,35 +189,58 @@ if ($action === 'add' || ($action === 'edit' && $groupid > 0)) {
             $courseids = array_column($rows, 'courseid');
         }
 
-        $sort = 0;
-        foreach ($courseids as $cid) {
-            if ((int)$cid <= 0) { continue; }
-            $DB->insert_record('local_learnpath_group_courses', (object)[
-                'groupid'   => $savedid,
-                'courseid'  => (int)$cid,
-                'sortorder' => $sort++,
-            ]);
+        if (empty($skip_course_refresh)) {
+            $sort = 0;
+            foreach ($courseids as $cid) {
+                if ((int)$cid <= 0) { continue; }
+                $DB->insert_record('local_learnpath_group_courses', (object)[
+                    'groupid'   => $savedid,
+                    'courseid'  => (int)$cid,
+                    'sortorder' => $sort++,
+                ]);
+            }
         }
 
-        // Save manually selected participants to user_assign table
+        // Save manually selected participants + cohort members to user_assign table
         $dbman = $DB->get_manager();
         if ($dbman->table_exists(new xmldb_table('local_learnpath_user_assign'))) {
             $DB->delete_records('local_learnpath_user_assign', ['groupid' => $savedid]);
+            $pnow = time();
+            $assigned_uids = [];
+
+            // Individual users
             $raw_users = $data->participant_userids ?? [];
             if (!is_array($raw_users)) {
                 $raw_users = array_filter(array_map('trim', explode(',', (string)$raw_users)));
             }
-            $pnow = time();
             foreach ($raw_users as $puid) {
                 $puid = (int)$puid;
-                if ($puid <= 0) { continue; }
-                if (!$DB->record_exists('user', ['id' => $puid, 'deleted' => 0])) { continue; }
+                if ($puid <= 0 || isset($assigned_uids[$puid])) continue;
+                if (!$DB->record_exists('user', ['id' => $puid, 'deleted' => 0])) continue;
                 $DB->insert_record('local_learnpath_user_assign', (object)[
-                    'groupid'     => $savedid,
-                    'userid'      => $puid,
-                    'assignedby'  => $USER->id,
-                    'timecreated' => $pnow,
+                    'groupid' => $savedid, 'userid' => $puid, 'assignedby' => $USER->id, 'timecreated' => $pnow,
                 ]);
+                $assigned_uids[$puid] = true;
+            }
+
+            // Cohort members
+            $raw_cohorts = $data->participant_cohortids ?? [];
+            if (!is_array($raw_cohorts)) {
+                $raw_cohorts = array_filter(array_map('intval', explode(',', (string)$raw_cohorts)));
+            }
+            foreach ($raw_cohorts as $cohortid) {
+                $cohortid = (int)$cohortid;
+                if ($cohortid <= 0) continue;
+                $members = $DB->get_records('cohort_members', ['cohortid' => $cohortid], '', 'userid');
+                foreach ($members as $cm) {
+                    $puid = (int)$cm->userid;
+                    if ($puid <= 0 || isset($assigned_uids[$puid])) continue;
+                    if (!$DB->record_exists('user', ['id' => $puid, 'deleted' => 0])) continue;
+                    $DB->insert_record('local_learnpath_user_assign', (object)[
+                        'groupid' => $savedid, 'userid' => $puid, 'assignedby' => $USER->id, 'timecreated' => $pnow,
+                    ]);
+                    $assigned_uids[$puid] = true;
+                }
             }
         }
 
@@ -233,6 +276,7 @@ if ($action === 'add' || ($action === 'edit' && $groupid > 0)) {
 
     // Display form (add/edit)
     echo $OUTPUT->header();
+    echo local_learnpath_brand_css();
     echo local_learnpath_page_header(
         $action === 'edit' ? get_string('edit_group', 'local_learnpath') : get_string('add_group', 'local_learnpath'),
         '',
@@ -261,6 +305,12 @@ $managers = $DB->get_records_sql(
      WHERE lpm.groupid=:gid',
     ['gid' => $groupid]
 );
+$scope_labels = [
+    'view'        => 'View only',
+    'view_remind' => 'View + Reminders',
+    'full'        => 'Full access',
+    'all'         => 'Full access',
+];
 foreach ($managers as $m) {
     $revoke_url = new moodle_url('/local/learnpath/manage.php', [
         'action'  => 'revoke_manager',
@@ -268,12 +318,26 @@ foreach ($managers as $m) {
         'userid'  => $m->userid,
         'sesskey' => sesskey(),
     ]);
-    $html .= '<div style="display:flex;align-items:center;gap:4px;margin-top:2px">';
-    $html .= '<span style="font-size:.72rem;color:#6b7280">' . htmlspecialchars($m->firstname . ' ' . $m->lastname) . '</span>';
-    $html .= '<span style="font-size:.64rem;background:#eff6ff;color:#1e40af;padding:1px 5px;border-radius:4px">' . htmlspecialchars($m->scope) . '</span>';
+    $scope_lbl = $scope_labels[$m->scope] ?? $m->scope;
+    $scope_form_url = (new moodle_url('/local/learnpath/manage.php'))->out(false);
+    $html .= '<div style="display:flex;align-items:center;gap:4px;margin-top:3px;flex-wrap:wrap">';
+    $html .= '<span style="font-size:.72rem;color:#374151;font-weight:600">' . htmlspecialchars($m->firstname . ' ' . $m->lastname) . '</span>';
+    // Inline scope selector
+    $html .= '<form method="post" action="' . $scope_form_url . '" style="display:inline;margin:0">';
+    $html .= '<input type="hidden" name="sesskey" value="' . sesskey() . '">';
+    $html .= '<input type="hidden" name="action" value="set_manager_scope">';
+    $html .= '<input type="hidden" name="groupid" value="' . $groupid . '">';
+    $html .= '<input type="hidden" name="userid" value="' . $m->userid . '">';
+    $html .= '<select name="scope" onchange="this.form.submit()" style="font-size:.68rem;border:1px solid #e5e7eb;border-radius:4px;padding:1px 4px;background:var(--lt-primary-pale);color:var(--lt-accent);cursor:pointer">';
+    foreach ($scope_labels as $sv => $sl) {
+        if ($sv === 'all') continue;
+        $cur = ($m->scope === $sv || ($sv === 'full' && $m->scope === 'all'));
+        $html .= '<option value="' . $sv . '"' . ($cur ? ' selected' : '') . '>' . $sl . '</option>';
+    }
+    $html .= '</select></form>';
     $html .= html_writer::link($revoke_url,
-        '<span style="color:#be123c;font-size:.7rem" title="Revoke access">✕</span>',
-        ['onclick' => "return confirm('Revoke manager access for this user?')"]);
+        '<span style="color:#be123c;font-size:.72rem;font-weight:700;padding:1px 5px;background:#fee2e2;border-radius:4px" title="Revoke manager access">✕ Revoke</span>',
+        ['onclick' => "return confirm('Revoke manager access for " . addslashes(htmlspecialchars($m->firstname . ' ' . $m->lastname)) . "?')"]);
     $html .= '</div>';
 }
 if (empty($managers)) {
@@ -285,6 +349,7 @@ return $html;
 
 // ── LIST ──────────────────────────────────────────────────────────────────────
 echo $OUTPUT->header();
+echo local_learnpath_brand_css();
 echo html_writer::link(new moodle_url('/local/learnpath/welcome.php'), '🏠 Welcome', ['style' => 'display:inline-block;margin-bottom:10px;margin-right:10px;font-family:var(--lt-font);font-size:.84rem;color:var(--lt-accent);text-decoration:none']);
 try {
 echo local_learnpath_page_header(

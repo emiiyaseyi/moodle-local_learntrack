@@ -22,7 +22,9 @@ require_once(__DIR__ . '/../../config.php');
 
 require_login();
 $ctx = context_system::instance();
-require_capability('local/learnpath:viewdashboard', $ctx);
+if (!local_learnpath_can_view_dashboard()) {
+    require_capability('local/learnpath:viewdashboard', $ctx); // throws proper error
+}
 
 $groupid     = optional_param('groupid',      0,        PARAM_INT);
 $view        = optional_param('view',         'summary', PARAM_ALPHA);
@@ -128,7 +130,8 @@ if ($isadmin && $groupid > 0 && optional_param('enroll_user', 0, PARAM_INT) > 0 
             $msg->component         = 'local_learnpath';
             $msg->name              = 'learntrack_reminder';
             $msg->userfrom          = \core_user::get_noreply_user();
-            $msg->userto            = $learner;
+            $inapp_learner = clone $learner; $inapp_learner->email = '';
+            $msg->userto            = $inapp_learner;
             $msg->subject           = 'You have been enrolled in a learning path: ' . format_string($group->name);
             $enroll_tpl = get_config('local_learnpath', 'email_enroll_body')
                 ?: 'Hi {firstname},\n\nYou have been added to the learning path "{groupname}" and enrolled in {count} course(s). Visit your dashboard to get started.\n\nLearnTrack';
@@ -140,8 +143,9 @@ if ($isadmin && $groupid > 0 && optional_param('enroll_user', 0, PARAM_INT) > 0 
             $msg->notification      = 1;
             $msg->contexturl        = $path_url;
             $msg->contexturlname    = 'View My Learning Path';
+            // Suppress Moodle's email processor — we send direct email below
             message_send($msg);
-            // Email
+            // Direct HTML email
             $noreply = \core_user::get_noreply_user();
             $noreply->firstname = get_config('local_learnpath', 'email_sender_name') ?: 'LearnTrack';
             $noreply->lastname  = '';
@@ -551,7 +555,8 @@ function local_learnpath_enroll_user_in_courses(int $userid, int $groupid): stri
             $msg->component         = 'local_learnpath';
             $msg->name              = 'learntrack_reminder';
             $msg->userfrom          = \core_user::get_noreply_user();
-            $msg->userto            = $learner;
+            $inapp_l2 = clone $learner; $inapp_l2->email = '';
+            $msg->userto            = $inapp_l2;
             $msg->subject           = 'You have been enrolled in a learning path: ' . \format_string($group->name);
             $msg->fullmessage       = 'You have been enrolled in ' . $enrolled . ' course(s) in the learning path: ' . \format_string($group->name) . '. Log in to start learning.';
             $msg->fullmessageformat = FORMAT_PLAIN;
@@ -561,7 +566,7 @@ function local_learnpath_enroll_user_in_courses(int $userid, int $groupid): stri
             $msg->contexturl        = (new \moodle_url('/local/learnpath/mypath.php', ['groupid' => $groupid]))->out(false);
             $msg->contexturlname    = 'View My Learning Path';
             \message_send($msg);
-            // Email
+            // Direct email
             $noreply = \core_user::get_noreply_user();
             $noreply->firstname = 'LearnTrack'; $noreply->lastname = '';
             \email_to_user($learner, $noreply, $msg->subject, $msg->fullmessage, $msg->fullmessagehtml);
@@ -645,8 +650,8 @@ function local_learnpath_render_summary(array $data, string $sc, string $sd, int
             }
         }
 
-        // Engagement score for this learner in this path
-        $eng = \local_learnpath\data\helper::get_engagement_score((int)$row->userid, $gid);
+        // Derive score from already-fetched progress (no extra queries)
+        $eng = (int)$row->overall_progress;
         $eng_color = $eng >= 70 ? '#10b981' : ($eng >= 40 ? '#f59e0b' : '#ef4444');
 
         echo '<tr class="lt-learner-row" data-name="' . s(strtolower($row->firstname . ' ' . $row->lastname)) . '" data-email="' . s(strtolower($row->email ?? '')) . '">';

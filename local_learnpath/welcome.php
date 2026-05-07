@@ -28,9 +28,9 @@ $brand   = get_config('local_learnpath', 'brand_color') ?: '#1e3a5f';
 $gcount  = $DB->count_records('local_learnpath_groups');
 $ccount  = $DB->count_records('local_learnpath_group_courses');
 echo $OUTPUT->header();
-echo '<style>:root{--lt-primary:'.$brand.';--lt-accent:'.$brand.'}</style>';
+echo local_learnpath_brand_css();
 echo '<style>'
-    . '.lt-welcome-hero{background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 55%,' . $brand . ' 100%);border-radius:16px;padding:44px 40px;color:#ffffff;margin-bottom:24px;position:relative;overflow:hidden}'
+    . '.lt-welcome-hero{background:linear-gradient(135deg,#0f172a 0%,var(--lt-primary-dark,#162d4a) 55%,var(--lt-accent) 100%);border-radius:16px;padding:44px 40px;color:#ffffff;margin-bottom:24px;position:relative;overflow:hidden}'
     . '.lt-welcome-hero::before{content:"";position:absolute;top:-50px;right:-50px;width:220px;height:220px;background:rgba(255,255,255,.05);border-radius:50%;pointer-events:none}'
     . '.lt-welcome-hero h1{font-size:2.2rem;font-weight:800;margin:0 0 10px;letter-spacing:-.4px;font-family:var(--lt-font);color:#ffffff}'
     . '.lt-welcome-hero p{font-size:1rem;color:rgba(255,255,255,.78);margin:0 0 24px;max-width:560px;font-family:var(--lt-font);line-height:1.6}'
@@ -52,20 +52,20 @@ echo '<style>'
     . '.lt-feat-title{font-size:.93rem;font-weight:700;color:#111827;margin:0 0 5px}'
     . '.lt-feat-desc{font-size:.8rem;color:#6b7280;margin:0;line-height:1.5}'
     . '.lt-dev-card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:28px 32px;box-shadow:0 1px 3px rgba(0,0,0,.05);font-family:var(--lt-font);margin-bottom:16px;text-align:center;max-width:480px;margin-left:auto;margin-right:auto}'
-    . '.lt-dev-avatar{width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,#1e3a5f,#3b82f6);display:flex;align-items:center;justify-content:center;font-size:1.6rem;margin:0 auto 14px}'
+    . '.lt-dev-avatar{width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,#1e3a5f,var(--lt-accent));display:flex;align-items:center;justify-content:center;font-size:1.6rem;margin:0 auto 14px}'
     . '.lt-dev-name{font-size:1.05rem;font-weight:800;color:#111827;margin:0 0 2px}'
     . '.lt-dev-role{font-size:.78rem;color:#6b7280;margin:0 0 14px}'
     . '.lt-dev-link{display:flex;align-items:center;justify-content:center;gap:8px;padding:8px 0;border-top:1px solid #f3f4f6;font-size:.82rem;color:#374151!important;text-decoration:none!important;transition:color .12s}'
-    . '.lt-dev-link:hover{color:#3b82f6!important}'
+    . '.lt-dev-link:hover{color:var(--lt-accent)!important}'
     . '.lt-quicknav{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:16px}'
     . '@media(max-width:560px){.lt-quicknav{grid-template-columns:1fr}}'
     . '.lt-quicknav-link{display:flex;align-items:center;gap:11px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;text-decoration:none!important;color:#111827!important;font-family:var(--lt-font);transition:all .14s}'
-    . '.lt-quicknav-link:hover{background:#eff6ff;border-color:#3b82f6;color:#1e40af!important}'
+    . '.lt-quicknav-link:hover{background:#eff6ff;border-color:var(--lt-accent);color:var(--lt-accent)!important}'
     . '.lt-qn-icon{font-size:1.15rem;flex-shrink:0}'
     . '.lt-qn-text strong{display:block;font-size:.86rem;font-weight:700}'
     . '.lt-qn-text span{font-size:.74rem;color:#9ca3af}'
     . '.lt-qn-arrow{margin-left:auto;color:#d1d5db;font-size:.9rem}'
-    . '.lt-quicknav-link:hover .lt-qn-arrow{color:#3b82f6}'
+    . '.lt-quicknav-link:hover .lt-qn-arrow{color:var(--lt-accent)}'
     . '</style>';
 // Hero
 echo '<div class="lt-welcome-hero"><div style="position:relative;z-index:1">';

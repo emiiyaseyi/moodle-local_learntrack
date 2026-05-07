@@ -22,7 +22,9 @@ require_once(__DIR__ . '/../../config.php');
 use local_learnpath\data\helper as DH;
 
 require_login();
-require_capability('local/learnpath:viewdashboard', context_system::instance());
+if (!local_learnpath_can_view_dashboard()) {
+    require_capability('local/learnpath:viewdashboard', context_system::instance());
+}
 
 $groupid  = optional_param('groupid',  0,        PARAM_INT);
 $action   = optional_param('action',   '',        PARAM_ALPHANUMEXT);

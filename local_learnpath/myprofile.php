@@ -93,6 +93,7 @@ $overall = $total_courses > 0 ? (int)round($total_done / $total_courses * 100) :
 $user_pic = $OUTPUT->user_picture($USER, ['size' => 100, 'link' => false]);
 
 echo $OUTPUT->header();
+echo local_learnpath_brand_css();
 echo '<style>:root{--lt-primary:' . $brand . ';--lt-accent:' . $brand . '}</style>';
 echo '<style>'
     . '.mp-wrap{max-width:860px;margin:0 auto;padding:14px;font-family:var(--lt-font,system-ui)}'

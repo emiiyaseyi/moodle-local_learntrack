@@ -42,7 +42,7 @@ $dbman = $DB->get_manager();
 $has_certs = $dbman->table_exists(new xmldb_table('local_learnpath_certs'));
 
 echo $OUTPUT->header();
-echo '<style>:root{--lt-primary:' . $brand . ';--lt-accent:' . $brand . '}</style>';
+echo local_learnpath_brand_css();
 echo html_writer::link(new moodle_url('/local/learnpath/welcome.php'), '🏠 Welcome',
     ['style' => 'display:inline-block;margin-bottom:14px;margin-right:10px;font-family:var(--lt-font);font-size:.84rem;color:var(--lt-accent);text-decoration:none']);
 

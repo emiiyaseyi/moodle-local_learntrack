@@ -149,7 +149,7 @@ if ($action !== '' && confirm_sesskey()) {
 
 // ── RENDER ────────────────────────────────────────────────────────────────────
 echo $OUTPUT->header();
-echo '<style>:root{--lt-primary:' . $brand . ';--lt-accent:' . $brand . '}</style>';
+echo local_learnpath_brand_css();
 echo html_writer::link(new moodle_url('/local/learnpath/welcome.php'), '🏠 Welcome',
     ['style' => 'display:inline-block;margin-bottom:10px;margin-right:12px;font-family:var(--lt-font);font-size:.84rem;color:var(--lt-accent);text-decoration:none']);
 echo html_writer::link(new moodle_url('/local/learnpath/manage.php'), '← Manage Paths',

@@ -112,6 +112,7 @@ if ($action === 'add' || ($action === 'edit' && $scheduleid)) {
     }
 
     echo $OUTPUT->header();
+echo local_learnpath_brand_css();
     echo $OUTPUT->render_from_template('local_learnpath/dynamic_styles', $brand_cfg);
     echo $OUTPUT->render_from_template('local_learnpath/page_nav', [
         'back_url'   => (new moodle_url('/local/learnpath/schedule.php', ['groupid' => $groupid]))->out(false),
@@ -189,6 +190,7 @@ foreach ($schedules_raw as $s) {
 }
 
 echo $OUTPUT->header();
+echo local_learnpath_brand_css();
 echo $OUTPUT->render_from_template('local_learnpath/dynamic_styles', $brand_cfg);
 
 echo $OUTPUT->render_from_template('local_learnpath/page_nav', [

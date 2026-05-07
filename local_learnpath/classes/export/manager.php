@@ -157,7 +157,6 @@ class manager {
         $brand = \get_config('local_learnpath', 'brand_name') ?: 'LearnTrack';
         $group = data_helper::get_group_with_courses($groupid);
 
-        // Summary row for export header
         $summary_meta = [
             $brand . ' Export',
             'Path: ' . \format_string($group->name),
@@ -165,34 +164,78 @@ class manager {
             'View: ' . ucfirst($viewmode),
         ];
 
+        // Always build all three datasets for complete exports
+        $sum_data    = data_helper::get_progress_summary($groupid, $viewerid, $user_status);
+        $detail_data = data_helper::get_progress_detail($groupid, $viewerid, $user_status);
+        if ($from_ts) {
+            $detail_data = array_filter($detail_data, function ($row) use ($from_ts, $to_ts) {
+                $ts = $row->lastaccess ?? 0;
+                return $ts && $ts >= $from_ts && ($to_ts === 0 || $ts <= $to_ts);
+            });
+        }
+
+        // Primary export matches the selected view
         if ($viewmode === 'summary') {
-            $data    = data_helper::get_progress_summary($groupid, $viewerid, $user_status);
             $headers = self::summary_headers();
-            $rows    = self::summary_rows($data);
+            $rows    = self::summary_rows($sum_data);
+        } elseif ($viewmode === 'comparison') {
+            $headers = self::comparison_headers($group->courses ?? []);
+            $rows    = self::comparison_rows($sum_data, $detail_data, $group->courses ?? []);
         } else {
-            $data    = data_helper::get_progress_detail($groupid, $viewerid, $user_status);
-            // Apply date filter if set
-            if ($from_ts) {
-                $data = array_filter($data, function ($row) use ($from_ts, $to_ts) {
-                    $ts = $row->lastaccess ?? 0;
-                    if (!$ts) {
-                        return false;
-                    }
-                    return $ts >= $from_ts && ($to_ts === 0 || $ts <= $to_ts);
-                });
-            }
             $headers = self::detail_headers();
-            $rows    = self::detail_rows($data);
+            $rows    = array_values(self::detail_rows($detail_data));
         }
 
         $summary = [
-            'meta'             => $summary_meta,
-            'total_records'    => count($rows),
-            'path_name'        => \format_string($group->name),
-            'date_generated'   => date('Y-m-d H:i:s'),
+            'meta'           => $summary_meta,
+            'total_records'  => count($rows),
+            'path_name'      => \format_string($group->name),
+            'date_generated' => date('Y-m-d H:i:s'),
+            // All three datasets for multi-sheet Excel
+            'all_datasets'   => [
+                'summary'    => ['headers' => self::summary_headers(),                               'rows' => self::summary_rows($sum_data)],
+                'detail'     => ['headers' => self::detail_headers(),                                'rows' => array_values(self::detail_rows($detail_data))],
+                'comparison' => ['headers' => self::comparison_headers($group->courses ?? []),       'rows' => self::comparison_rows($sum_data, $detail_data, $group->courses ?? [])],
+            ],
         ];
 
         return [$headers, array_values($rows), $summary];
+    }
+
+    private static function comparison_headers(array $courses): array {
+        $h = ['Learner', 'Email', 'Overall %'];
+        foreach ($courses as $c) {
+            $h[] = \format_string($c->fullname ?? $c->shortname ?? 'Course');
+        }
+        $h[] = 'Status';
+        return $h;
+    }
+
+    private static function comparison_rows(array $summary_data, array $detail_data, array $courses): array {
+        if (empty($courses)) return [];
+        // Build [userid][courseid] = progress%
+        $prog_map = [];
+        foreach ($detail_data as $row) {
+            $prog_map[(int)$row->userid][(int)$row->courseid] = $row->progress;
+        }
+        $rows = [];
+        foreach ($summary_data as $s) {
+            $uid = (int)$s->userid;
+            $row = [
+                $s->firstname . ' ' . $s->lastname,
+                $s->email,
+                $s->overall_progress . '%',
+            ];
+            foreach ($courses as $c) {
+                $pct = $prog_map[$uid][(int)$c->id] ?? null;
+                $row[] = $pct === null ? '-' : ($pct >= 100 ? '✓ Done' : $pct . '%');
+            }
+            $status = $s->overall_progress >= 100 ? 'Complete'
+                : ($s->overall_progress > 0 ? 'In Progress' : 'Not Started');
+            $row[] = $status;
+            $rows[] = $row;
+        }
+        return $rows;
     }
 
     private static function detail_headers(): array {
@@ -258,14 +301,11 @@ class manager {
         header('Content-Type: text/csv; charset=utf-8');
         header('Content-Disposition: attachment; filename="' . $filename . '.csv"');
         $out = fopen('php://output', 'w');
-        // Summary header
         fputcsv($out, ['LearnTrack Export — ' . \format_string($group->name)]);
-        fputcsv($out, ['Generated: ' . date('Y-m-d H:i:s'), 'Total records: ' . count($rows)]);
+        fputcsv($out, ['Generated: ' . date('Y-m-d H:i:s'), 'Records: ' . count($rows)]);
         fputcsv($out, []);
         fputcsv($out, $headers);
-        foreach ($rows as $row) {
-            fputcsv($out, $row);
-        }
+        foreach ($rows as $row) { fputcsv($out, $row); }
         fclose($out);
         exit;
     }
@@ -280,41 +320,39 @@ class manager {
         global $CFG;
         require_once($CFG->libdir . '/excellib.class.php');
 
+        $brand = \get_config('local_learnpath', 'brand_color') ?: '#1e3a5f';
         $workbook = new \MoodleExcelWorkbook('-');
         $workbook->send($filename . '.xlsx');
 
-        // Main data sheet
-        $sheet = $workbook->add_worksheet(\clean_filename($sheetname));
-        $bold  = $workbook->add_format(['bold' => 1, 'bg_color' => '#1e3a5f', 'color' => '#ffffff']);
-        $meta  = $workbook->add_format(['bold' => 1, 'color' => '#6b7280']);
+        $bold = $workbook->add_format(['bold' => 1, 'bg_color' => $brand, 'color' => '#ffffff']);
+        $meta = $workbook->add_format(['bold' => 1, 'color' => '#6b7280']);
 
-        // Meta rows
-        $sheet->write_string(0, 0, 'LearnTrack Export — ' . $sheetname, $meta);
-        $sheet->write_string(1, 0, 'Generated: ' . $summary['date_generated'], $meta);
-        $sheet->write_string(2, 0, 'Total records: ' . $summary['total_records'], $meta);
+        $sheet_defs = [
+            'Summary'    => 'summary',
+            'Per Course' => 'detail',
+            'Comparison' => 'comparison',
+        ];
 
-        // Headers
-        foreach ($headers as $col => $h) {
-            $sheet->write_string(4, $col, $h, $bold);
-            $sheet->set_column($col, $col, 20);
-        }
+        foreach ($sheet_defs as $tab_name => $key) {
+            $ds      = $summary['all_datasets'][$key] ?? null;
+            $sh      = $ds ? $ds['headers'] : $headers;
+            $sr      = $ds ? $ds['rows']    : $rows;
+            $sheet   = $workbook->add_worksheet($tab_name);
 
-        // Data
-        foreach ($rows as $ri => $row) {
-            foreach ($row as $ci => $cell) {
-                $sheet->write_string($ri + 5, $ci, (string)$cell);
+            $sheet->write_string(0, 0, 'LearnTrack — ' . $sheetname . ' (' . $tab_name . ')', $meta);
+            $sheet->write_string(1, 0, 'Generated: ' . $summary['date_generated'], $meta);
+            $sheet->write_string(2, 0, 'Records: ' . count($sr), $meta);
+
+            foreach ($sh as $col => $h) {
+                $sheet->write_string(4, $col, $h, $bold);
+                $sheet->set_column($col, $col, 22);
+            }
+            foreach ($sr as $ri => $row) {
+                foreach ($row as $ci => $cell) {
+                    $sheet->write_string($ri + 5, $ci, (string)$cell);
+                }
             }
         }
-
-        // Summary sheet
-        $ssheet = $workbook->add_worksheet('Summary');
-        $ssheet->write_string(0, 0, 'LearnTrack Summary', $bold);
-        $ssheet->write_string(1, 0, 'Path:',              $meta);
-        $ssheet->write_string(1, 1, $summary['path_name']);
-        $ssheet->write_string(2, 0, 'Generated:',         $meta);
-        $ssheet->write_string(2, 1, $summary['date_generated']);
-        $ssheet->write_string(3, 0, 'Total records:',     $meta);
-        $ssheet->write_string(3, 1, (string)$summary['total_records']);
 
         $workbook->close();
         exit;

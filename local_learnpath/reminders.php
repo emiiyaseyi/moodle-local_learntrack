@@ -146,6 +146,15 @@ if ($action === 'trigger_send' && $reminderid && confirm_sesskey()) {
         } catch (\Throwable $e_send) {
             debugging('LearnTrack: send_reminder failed for user ' . $uid . ': ' . $e_send->getMessage(), DEBUG_DEVELOPER);
         }
+        // Queue a login popup for this learner — shows next time they load a page
+        try {
+            if (function_exists('get_user_preference') && function_exists('set_user_preference')) {
+                $existing_raw = get_user_preference('lt_remind_popup', '[]', $uid);
+                $existing = json_decode($existing_raw, true) ?: [];
+                $existing[] = ['groupid' => $trig_groupid, 'message' => $reminder->message ?? '', 'time' => time()];
+                set_user_preference('lt_remind_popup', json_encode($existing), $learner);
+            }
+        } catch (\Throwable $e_pref) {}
         $sent++;
     }
 
@@ -220,6 +229,13 @@ if ($action === 'bulk_remind' && confirm_sesskey()) {
         }
         try {
             \local_learnpath\notification\notifier::send_reminder($fake_reminder, $learner, $remind_group, $course_list);
+            // Queue login popup for this learner
+            if (function_exists('get_user_preference') && function_exists('set_user_preference')) {
+                $ep_raw = get_user_preference('lt_remind_popup', '[]', $buid);
+                $ep = json_decode($ep_raw, true) ?: [];
+                $ep[] = ['groupid' => $groupid ?: 0, 'message' => $fake_reminder->message, 'time' => time()];
+                set_user_preference('lt_remind_popup', json_encode($ep), $learner);
+            }
         } catch (\Throwable $e_bulk) {
             debugging('LearnTrack: bulk send_reminder failed for user ' . $buid . ': ' . $e_bulk->getMessage(), DEBUG_DEVELOPER);
         }
@@ -246,7 +262,7 @@ if ($action === 'bulk_remind' && confirm_sesskey()) {
 // RENDER
 // ════════════════════════════════════════════════════════════════════
 echo $OUTPUT->header();
-echo '<style>:root{--lt-primary:' . $brand . ';--lt-accent:' . $brand . '}</style>';
+echo local_learnpath_brand_css();
 echo html_writer::link(new moodle_url('/local/learnpath/welcome.php'), '🏠 Welcome',
     ['style' => 'display:inline-block;margin-bottom:10px;margin-right:12px;font-family:var(--lt-font);font-size:.84rem;color:var(--lt-accent);text-decoration:none']);
 echo html_writer::link(new moodle_url('/local/learnpath/manage.php'), '← Manage Paths',

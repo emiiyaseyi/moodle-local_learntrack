@@ -103,6 +103,7 @@ $brand_cfg = [
 
 // ── Render ────────────────────────────────────────────────────────────────────
 echo $OUTPUT->header();
+echo local_learnpath_brand_css();
 echo $OUTPUT->render_from_template('local_learnpath/dynamic_styles', $brand_cfg);
 
 // Notifications

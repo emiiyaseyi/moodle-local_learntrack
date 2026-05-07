@@ -19,7 +19,7 @@ require_once(__DIR__ . '/../../config.php');
 
 require_login();
 $ctx = context_system::instance();
-if (!has_capability('local/learnpath:manage', $ctx) && !has_capability('local/learnpath:viewdashboard', $ctx)) {
+if (!local_learnpath_can_view_dashboard()) {
     throw new required_capability_exception($ctx, 'local/learnpath:viewdashboard', 'nopermissions', '');
 }
 
@@ -41,7 +41,7 @@ echo $OUTPUT->header();
 echo html_writer::link(new moodle_url('/local/learnpath/welcome.php'), '🏠 Welcome', ['style' => 'display:inline-block;margin-bottom:14px;margin-right:10px;font-family:var(--lt-font);font-size:.84rem;color:var(--lt-accent);text-decoration:none']);
 try {
 
-echo '<style>:root{--lt-primary:' . $brand . ';--lt-accent:' . $brand . '}</style>';
+echo local_learnpath_brand_css();
 
 // Nav
 echo html_writer::link(new moodle_url('/local/learnpath/index.php'), '📊 Dashboard',

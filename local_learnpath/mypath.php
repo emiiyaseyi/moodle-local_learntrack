@@ -36,17 +36,22 @@ $PAGE->set_title('LearnTrack — My Learning Paths');
 global $USER, $OUTPUT, $DB;
 $brand = get_config('local_learnpath', 'brand_color') ?: '#1e3a5f';
 
-// Find paths this learner is enrolled in
+// Find paths this learner is assigned to.
+// Authoritative source: local_learnpath_user_assign (seeded on upgrade for all paths).
+// No enrollment fallback — only explicitly assigned learners see a path.
 $all_groups = $DB->get_records('local_learnpath_groups', null, 'name ASC');
 $my_groups  = [];
-foreach ($all_groups as $g) {
-    $courses = DH::get_group_courses($g->id);
-    foreach ($courses as $c) {
-        $ctx = context_course::instance($c->id, IGNORE_MISSING);
-        if ($ctx && is_enrolled($ctx, $USER->id)) {
-            $my_groups[$g->id] = $g;
-            break;
-        }
+$isadmin_mp = has_capability('local/learnpath:manage', context_system::instance(), $USER->id);
+
+if ($isadmin_mp) {
+    $my_groups = $all_groups;
+} else {
+    $assigned_gids_mp = $DB->get_fieldset_select(
+        'local_learnpath_user_assign', 'groupid', 'userid = :uid', ['uid' => $USER->id]
+    );
+    $assigned_set_mp = array_flip($assigned_gids_mp);
+    foreach ($all_groups as $g) {
+        if (isset($assigned_set_mp[$g->id])) { $my_groups[$g->id] = $g; }
     }
 }
 

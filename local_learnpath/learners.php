@@ -112,12 +112,8 @@ if ($action === 'add' && confirm_sesskey()) {
     $now = time();
     $added = 0;
     foreach ($ids as $uid) {
-        if ($uid <= 0) {
-            continue;
-        }
-        if (!$DB->record_exists('user', ['id' => $uid, 'deleted' => 0])) {
-            continue;
-        }
+        if ($uid <= 0) continue;
+        if (!$DB->record_exists('user', ['id' => $uid, 'deleted' => 0])) continue;
         if (!$DB->record_exists('local_learnpath_user_assign', ['groupid' => $groupid, 'userid' => $uid])) {
             $DB->insert_record('local_learnpath_user_assign', (object)[
                 'groupid'     => $groupid,
@@ -131,8 +127,40 @@ if ($action === 'add' && confirm_sesskey()) {
     redirect(
         new moodle_url('/local/learnpath/learners.php', ['groupid' => $groupid]),
         $added . ' learner(s) added to path.',
-        null,
-        \core\output\notification::NOTIFY_SUCCESS
+        null, \core\output\notification::NOTIFY_SUCCESS
+    );
+}
+
+if ($action === 'add_cohorts' && confirm_sesskey()) {
+    $cohort_ids = optional_param_array('cohort_ids', [], PARAM_INT);
+    $cohort_ids = array_filter(array_map('intval', $cohort_ids));
+    $now   = time();
+    $added = 0;
+    $skipped = 0;
+    foreach ($cohort_ids as $cohortid) {
+        if ($cohortid <= 0) continue;
+        $members = $DB->get_records('cohort_members', ['cohortid' => $cohortid], '', 'userid');
+        foreach ($members as $m) {
+            $uid = (int)$m->userid;
+            if (!$DB->record_exists('user', ['id' => $uid, 'deleted' => 0])) continue;
+            if ($DB->record_exists('local_learnpath_user_assign', ['groupid' => $groupid, 'userid' => $uid])) {
+                $skipped++;
+                continue;
+            }
+            $DB->insert_record('local_learnpath_user_assign', (object)[
+                'groupid'     => $groupid,
+                'userid'      => $uid,
+                'assignedby'  => $USER->id,
+                'timecreated' => $now,
+            ]);
+            $added++;
+        }
+    }
+    $msg = $added . ' learner(s) added from cohort(s)';
+    if ($skipped > 0) $msg .= ' (' . $skipped . ' already assigned, skipped)';
+    redirect(
+        new moodle_url('/local/learnpath/learners.php', ['groupid' => $groupid]),
+        $msg . '.', null, \core\output\notification::NOTIFY_SUCCESS
     );
 }
 
@@ -172,7 +200,7 @@ if ($action === 'search') {
 
 // ── PAGE OUTPUT ────────────────────────────────────────────────────────────────
 echo $OUTPUT->header();
-echo '<style>:root{--lt-primary:' . $brand . ';--lt-accent:' . $brand . '}</style>';
+echo local_learnpath_brand_css();
 
 echo html_writer::link(
     new moodle_url('/local/learnpath/manage.php'),
@@ -210,6 +238,60 @@ echo '</div>';
 echo '<div id="lt-selected-wrap" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:12px"></div>';
 echo '</form>';
 echo '</div></div>';
+
+// ── ADD BY COHORT SECTION ─────────────────────────────────────────────────────
+$cohorts_all = $DB->get_records('cohort', null, 'name ASC', 'id, name, idnumber, component');
+if (!empty($cohorts_all)) {
+    echo '<div class="lt-card" style="margin-bottom:16px">';
+    echo '<div class="lt-card-header"><h3 class="lt-card-title">&#128101; Add by Cohort</h3>';
+    echo '<span style="font-family:var(--lt-font);font-size:.76rem;color:#9ca3af">Select one or more cohorts — all their members will be added</span>';
+    echo '</div>';
+    echo '<div class="lt-card-body">';
+    echo '<form method="post" action="' . (new moodle_url('/local/learnpath/learners.php', ['groupid' => $groupid, 'action' => 'add_cohorts', 'sesskey' => sesskey()]))->out(false) . '">';
+
+    // Cohort multi-select with search filter
+    echo '<div style="margin-bottom:12px">';
+    echo '<input type="text" id="lt-cohort-filter" placeholder="Filter cohorts…" autocomplete="off"'
+        . ' style="font-family:var(--lt-font);font-size:.84rem;border:1.5px solid #e5e7eb;border-radius:8px;padding:7px 12px;width:100%;max-width:480px;box-sizing:border-box;margin-bottom:8px;outline:none"'
+        . ' oninput="ltFilterCohorts(this.value)">';
+    echo '<div id="lt-cohort-list" style="max-height:220px;overflow-y:auto;border:1.5px solid #e5e7eb;border-radius:8px;background:#f9fafb;padding:6px">';
+    foreach ($cohorts_all as $co) {
+        $member_count = $DB->count_records('cohort_members', ['cohortid' => $co->id]);
+        $label = format_string($co->name);
+        if ($co->idnumber) $label .= ' [' . s($co->idnumber) . ']';
+        $label .= ' <span style="color:#9ca3af;font-size:.74rem">(' . $member_count . ' member' . ($member_count !== 1 ? 's' : '') . ')</span>';
+        echo '<label class="lt-cohort-row" style="display:flex;align-items:center;gap:9px;padding:7px 10px;cursor:pointer;border-radius:6px;font-family:var(--lt-font);font-size:.84rem;transition:background .1s"'
+            . ' onmouseover="this.style.background=\'#eff6ff\'" onmouseout="this.style.background=\'\'">';
+        echo '<input type="checkbox" name="cohort_ids[]" value="' . $co->id . '" style="width:15px;height:15px;flex-shrink:0">';
+        echo '<span class="lt-cohort-label">' . $label . '</span>';
+        echo '</label>';
+    }
+    echo '</div></div>';
+
+    echo '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">';
+    echo '<button type="submit" class="lt-btn lt-btn-primary">&#128101; Add Cohort Members</button>';
+    echo '<label style="font-family:var(--lt-font);font-size:.8rem;color:#6b7280;cursor:pointer">';
+    echo '<input type="checkbox" id="lt-cohort-select-all" onchange="ltCohortToggleAll(this.checked)" style="margin-right:5px">Select all</label>';
+    echo '</div>';
+    echo '</form>';
+    echo '</div></div>';
+
+    // Cohort filter + select-all JS
+    $PAGE->requires->js_init_code("
+window.ltFilterCohorts = function(q) {
+    q = q.toLowerCase();
+    document.querySelectorAll('#lt-cohort-list .lt-cohort-row').forEach(function(row) {
+        var txt = row.querySelector('.lt-cohort-label').textContent.toLowerCase();
+        row.style.display = txt.includes(q) ? '' : 'none';
+    });
+};
+window.ltCohortToggleAll = function(checked) {
+    document.querySelectorAll('#lt-cohort-list input[type=checkbox]').forEach(function(cb) {
+        if (cb.closest('.lt-cohort-row').style.display !== 'none') cb.checked = checked;
+    });
+};
+");
+}
 
 // ── ASSIGNED LEARNERS LIST ────────────────────────────────────────────────────
 $assigned_sql = "SELECT u.id, u.firstname, u.lastname, u.email, u.username,

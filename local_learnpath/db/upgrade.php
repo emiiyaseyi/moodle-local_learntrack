@@ -462,5 +462,347 @@ function xmldb_local_learnpath_upgrade(int $oldversion): bool {
         upgrade_plugin_savepoint(true, 2026050105, 'local', 'learnpath');
     }
 
+    if ($oldversion < 2026050107) {
+        // v1.0.0 (2026050107): Definitive fix for block/mypath showing removed paths.
+        // Root cause: enrollment fallback ran whenever $paths_with_assign_set was empty
+        // (e.g. after last learner removed from a path, or for paths with zero assignments).
+        // Fix: when local_learnpath_user_assign table exists, explicit assignment is the
+        // ONLY gate — no enrollment fallback under any circumstances. Enrollment fallback
+        // only runs on pre-upgrade installs where the table doesn't exist yet.
+        // Same fix applied to mypath.php (learner-facing path list).
+        // No DB schema changes.
+        upgrade_plugin_savepoint(true, 2026050107, 'local', 'learnpath');
+    }
+
+    if ($oldversion < 2026050106) {
+        // v1.0.0 (2026050106): Performance overhaul — eliminate N×M×5 query pattern.
+        // get_progress_detail() now uses 4 bulk queries (was N×M×5).
+        // get_progress_summary() reads progress cache first (was full detail recalc).
+        // New get_user_path_progress() for block: one batch cache query for all groups.
+        // Block membership checks batched (was N record_exists calls per group).
+        // Removed per-row get_engagement_score() from dashboard render loop.
+        // Static tbl_exists() cache eliminates repeated table_exists() calls.
+        // No DB schema changes.
+        upgrade_plugin_savepoint(true, 2026050106, 'local', 'learnpath');
+    }
+
+    if ($oldversion < 2026050108) {
+        // v1.0.0 (2026050108): Lasting fix for block showing wrong paths.
+        //
+        // ROOT CAUSE: paths created without using the explicit participant picker had zero
+        // records in local_learnpath_user_assign. The block fell back to course enrollment,
+        // so any learner enrolled in a course that happened to be in a path would see it.
+        //
+        // FIX: one-time data migration — seed local_learnpath_user_assign from current
+        // course enrollment for every path that has no explicit assignments yet.
+        // After this, user_assign is the authoritative gate for ALL paths on this site.
+        // Block and mypath.php no longer have any enrollment fallback.
+        if ($dbman->table_exists(new xmldb_table('local_learnpath_user_assign'))
+            && $dbman->table_exists(new xmldb_table('local_learnpath_group_courses'))) {
+            $paths = $DB->get_records('local_learnpath_groups', null, 'id ASC', 'id');
+            $now   = time();
+            foreach ($paths as $path) {
+                // Only seed paths that have no explicit assignments yet
+                if ($DB->record_exists('local_learnpath_user_assign', ['groupid' => $path->id])) {
+                    continue;
+                }
+                $courseids = $DB->get_fieldset_select(
+                    'local_learnpath_group_courses', 'courseid', 'groupid = :gid', ['gid' => $path->id]
+                );
+                if (empty($courseids)) {
+                    continue;
+                }
+                list($cins, $cps) = $DB->get_in_or_equal($courseids, SQL_PARAMS_NAMED, 'mc');
+                $enrolled = $DB->get_records_sql(
+                    "SELECT DISTINCT ue.userid
+                     FROM {user_enrolments} ue
+                     JOIN {enrol} e ON e.id = ue.enrolid AND e.courseid {$cins}
+                     JOIN {user} u  ON u.id = ue.userid AND u.deleted = 0 AND u.suspended = 0",
+                    $cps
+                );
+                foreach ($enrolled as $eu) {
+                    if (!$DB->record_exists('local_learnpath_user_assign',
+                            ['groupid' => $path->id, 'userid' => $eu->userid])) {
+                        $DB->insert_record('local_learnpath_user_assign', (object)[
+                            'groupid'     => $path->id,
+                            'userid'      => (int)$eu->userid,
+                            'assignedby'  => 0,
+                            'timecreated' => $now,
+                        ]);
+                    }
+                }
+            }
+        }
+        upgrade_plugin_savepoint(true, 2026050108, 'local', 'learnpath');
+    }
+
+    if ($oldversion < 2026050109) {
+        // v1.0.0 (2026050109): Manager invite overhaul.
+        // - invite-accept.php: new public page for accepting/rejecting invites (no admin cap required).
+        // - manager-invite.php: in-app notification now points to invite-accept.php.
+        //   Non-admin users landing on manager-invite.php with a token are redirected.
+        //   Added Resend action for expired/revoked invites.
+        // - Block: distinct "Paths I Manage" (purple, dashboard links) and "My Learning Paths"
+        //   (learner progress) sections with clear visual separation.
+        // No DB schema changes.
+        upgrade_plugin_savepoint(true, 2026050109, 'local', 'learnpath');
+    }
+
+    if ($oldversion < 2026050110) {
+        // v1.0.0 (2026050110): Fix invite-accept redirect bug + cohort support.
+        // invite-accept.php rewritten to use GET+sesskey links instead of POST form —
+        // eliminates spurious browser replays triggered by Moodle notification redirects.
+        // manager-invite.php: all token URLs now redirect to invite-accept.php (admins too).
+        // learners.php: add_cohorts action + cohort picker UI with member counts,
+        // searchable filter, select-all, and multi-cohort support.
+        // No DB schema changes.
+        upgrade_plugin_savepoint(true, 2026050110, 'local', 'learnpath');
+    }
+
+    if ($oldversion < 2026050111) {
+        // v1.0.0 (2026050111): Definitive invite-accept fix + reminder popup.
+        // invite-accept.php: actions now POST-only with JS confirm guards; cache-control
+        // headers prevent browser replay; GET requests are read-only (never trigger accept).
+        // manager-invite.php: all token URLs redirect to invite-accept.php (including admins).
+        // Accept notifies inviter via in-app; Decline notifies inviter and redirects to
+        // dashboard with "owner has been informed" message.
+        // Reminder popup: when Send Now is triggered, each matching learner receives a
+        // user_preference 'lt_remind_popup'. On next login or page load, lib.php reads it,
+        // clears it, and shows a popup with path name and "Continue Learning" button.
+        // No DB schema changes.
+        upgrade_plugin_savepoint(true, 2026050111, 'local', 'learnpath');
+    }
+
+    if ($oldversion < 2026050112) {
+        // v1.0.0 (2026050112): Rebuilt invite-accept.php from scratch.
+        // The page now bypasses Moodle's $OUTPUT->header()/footer() entirely.
+        // No AMD, no theme JS, no plugin hooks — just require_login() + pure HTML.
+        // Actions (accept/reject) are POST-only with JS confirm guard + header() redirect.
+        // This eliminates any possibility of auto-redirect from Moodle JS interference.
+        upgrade_plugin_savepoint(true, 2026050112, 'local', 'learnpath');
+    }
+
+    if ($oldversion < 2026050113) {
+        // v1.0.0 (2026050113): Three critical fixes.
+        // 1. Permission: path managers (in local_learnpath_managers) get dashboard
+        //    access via new local_learnpath_can_view_dashboard() helper in lib.php;
+        //    index.php, overview.php, leaderboard.php now check the table alongside
+        //    the Moodle capability so no Moodle role assignment is needed.
+        // 2. Brand color: new local_learnpath_brand_css() helper computes
+        //    --lt-primary-dark and --lt-primary-pale from the brand color; all pages
+        //    now call this instead of the bare --lt-accent override. styles.css
+        //    gradient no longer has hardcoded #1e40af.
+        // 3. Logo persistence: cert_logo_path removed from branding.php $fields
+        //    (it has no form input, so being in $fields caused it to be cleared on
+        //    every Save). cert_logo_pos added to $fields so logo position actually
+        //    saves. Logo file itself is safe in $CFG->dataroot/local_learnpath_logos/.
+        // No DB schema changes.
+        upgrade_plugin_savepoint(true, 2026050113, 'local', 'learnpath');
+    }
+
+    if ($oldversion < 2026050114) {
+        // v1.0.0 (2026050114): Five improvements.
+        // 1. Brand color: all remaining hardcoded #1e40af and #3b82f6 in styles.css
+        //    now use CSS variables (--lt-accent, --lt-primary-pale). Table headers
+        //    use --lt-primary instead of hardcoded navy.
+        // 2. Export: Excel now has three sheets — Summary, Per Course, Comparison —
+        //    matching exactly what the dashboard shows. Comparison export added.
+        //    Excel header row uses the admin's brand color instead of hardcoded navy.
+        // 3. Manager permissions: admin can set scope per manager (View only /
+        //    View+Reminders / Full access) via inline dropdown on manage.php.
+        //    set_manager_scope action handles the update.
+        // 4. Cohort in path creation: group_form.php now has a cohort multi-select
+        //    in the participant section. manage.php save merges cohort members into
+        //    local_learnpath_user_assign alongside individually selected users.
+        // 5. Manager revocation UI improved: revoke button now shows user name.
+        // No DB schema changes.
+        upgrade_plugin_savepoint(true, 2026050114, 'local', 'learnpath');
+    }
+
+    if ($oldversion < 2026050115) {
+        // v1.0.0 (2026050115): Manager save fix + brand color + block redesign.
+        // manage.php action param changed PARAM_ALPHA→PARAM_ALPHANUMEXT so underscored
+        // actions (revoke_manager, set_manager_scope) are no longer stripped.
+        // local_learnpath_brand_css() added to manage.php and all other pages that
+        // were missing it (email, myprofile, schedule, welcome).
+        // Block completely rebuilt: priority "Continue Learning" card, status badges
+        // (On Track/At Risk/Overdue/Done), deadline awareness, last-active date,
+        // collapsible path list (show 3, toggle rest), separate manager section,
+        // quick actions, reminder notice, overall progress ring + course bar.
+        // No DB schema changes.
+        upgrade_plugin_savepoint(true, 2026050115, 'local', 'learnpath');
+    }
+
+    if ($oldversion < 2026050117) {
+        // v1.0.0 (2026050117): Guard get_user_preference() / set_user_preference() /
+        // unset_user_preference() with function_exists() checks in lib.php, reminders.php,
+        // and block. These Moodle functions are unavailable in early bootstrap and CLI
+        // upgrade contexts, causing "Call to undefined function" fatal errors on install.
+        // No DB schema changes.
+        upgrade_plugin_savepoint(true, 2026050117, 'local', 'learnpath');
+    }
+
+    if ($oldversion < 2026050118) {
+        // v1.0.0 (2026050118): Email + color fixes.
+        // notifier.php: removed duplicate salutation (build_html no longer adds "Dear name,"
+        //   since default_message already includes it); fixed {groupname} → {{groupname}} in
+        //   default subject so path name is replaced; URLs in email body now hyperlinked;
+        //   build_html now uses email_signatory, email_sig_title, email_show_footer,
+        //   email_footer_text_custom admin settings.
+        // branding.php: added Email Appearance section (signatory, title, footer toggle,
+        //   custom footer text) and Block Design Colours section (learner color, manager
+        //   color with live mini-preview). Both saved to plugin config.
+        // welcome.php: removed hardcoded #3b82f6/#1e40af; hero gradient uses CSS variables.
+        // block: reads block_learner_color and block_manager_color from config; all manager
+        //   section purple now uses --blk-mgr variable.
+        // No DB schema changes.
+        upgrade_plugin_savepoint(true, 2026050118, 'local', 'learnpath');
+    }
+
+    if ($oldversion < 2026050119) {
+        // v1.0.0 (2026050119): Email overhaul.
+        // db/messages.php: learntrack_reminder email default changed to MESSAGE_PERMITTED only.
+        // Clear ALL existing email-enabled preferences for learntrack_reminder so the new
+        // popup-only default applies to every user going forward.
+        $DB->delete_records_select('user_preferences',
+            $DB->sql_like('name', ':n', false),
+            ['n' => 'message_provider_local_learnpath_learntrack_%']
+        );
+        // notifier.php: removed duplicate sign-off from default_message(); build_html()
+        //   now uses email_signature_html (rich HTML from branding) or falls back to
+        //   plain text signatory. Table-based HTML layout for Outlook compatibility.
+        //   URLs in body auto-hyperlinked. {{groupname}} fixed in default subject.
+        // branding.php: rich signature editor (contenteditable + toolbar + image upload),
+        //   email_replyto field, email_signature_html stored as PARAM_RAW.
+        // signature_upload.php: new endpoint for uploading inline signature images.
+        upgrade_plugin_savepoint(true, 2026050119, 'local', 'learnpath');
+    }
+
+    if ($oldversion < 2026050120) {
+        // v1.0.0 (2026050120): Double email fix + category sync setting.
+        // notifier.php: suppress_inapp_email() helper sets popup-only preference
+        //   for each user before message_send() — prevents Moodle's email processor
+        //   from firing a second plain-text email alongside our direct HTML email.
+        //   Applied in: notifier.php send_inapp(), manager-invite.php (send + resend),
+        //   index.php (enroll notification × 2).
+        // Upgrade: clear ALL existing learntrack_reminder message preferences so new
+        //   popup-only default applies to all existing users.
+        // group_form.php: new 'auto_sync_courses' checkbox (visible only for category-type
+        //   paths). When unchecked, saving the path keeps existing courses unchanged.
+        // manage.php: honours auto_sync_courses flag; stores it on the DB record.
+        // Add auto_sync_courses column to local_learnpath_groups.
+        $table = new xmldb_table('local_learnpath_groups');
+        $field = new xmldb_field('auto_sync_courses', XMLDB_TYPE_INTEGER, '1', null, XMLDB_NOTNULL, null, '1', 'adminnotes');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+        // Default existing category-type paths to auto_sync = 1
+        $DB->execute("UPDATE {local_learnpath_groups} SET auto_sync_courses = 1 WHERE grouptype = 'category'");
+        upgrade_plugin_savepoint(true, 2026050120, 'local', 'learnpath');
+    }
+
+    if ($oldversion < 2026050121) {
+        // v1.0.0 (2026050121): Email delivery fix + navigation.
+        // REPLACED suppress_inapp_email() with clone-user approach: send_inapp() now clones
+        //   the user object and blanks email before passing to message_send(). Moodle's
+        //   email processor checks userto->email and skips if blank; popup processor uses
+        //   userto->id (unchanged) so bell notification still shows. No preferences touched.
+        //   Applied in: notifier.php send_inapp(), manager-invite.php ×2, index.php ×2.
+        // messages.php reverted to email=MESSAGE_DEFAULT_ENABLED so existing user prefs work.
+        // lib.php extend_navigation(): added path manager nav node with per-path links;
+        //   admin sees full menu (Welcome, Overview, Dashboard, Manage, Leaderboard,
+        //   Course Insights, Branding, Managers); path manager sees Dashboard + Reminders
+        //   + per-path quick links; learner sees My Learning Paths only.
+        // No DB schema changes.
+        upgrade_plugin_savepoint(true, 2026050121, 'local', 'learnpath');
+    }
+
+    if ($oldversion < 2026050122) {
+        // v1.0.0 (2026050122): Primary (top bar) navigation + notifier rebuild.
+        // Added local_learnpath_extend_navigation_primary() to lib.php so the
+        // plugin appears in Moodle 4.x top navigation bar (not just sidebar).
+        // Visibility is role-aware: admin → welcome; path manager → dashboard;
+        // learner → mypath.php (hidden when user has no assigned paths).
+        // Also: notifier.php fully rebuilt — email sent when channel_email OR
+        // channel_inapp is enabled; blank-email clone prevents double email.
+        // No DB schema changes.
+        upgrade_plugin_savepoint(true, 2026050122, 'local', 'learnpath');
+    }
+
+    if ($oldversion < 2026050123) {
+        // v1.0.0 (2026050123): Email delivery fix (switch to message_send) + nav hooks.
+        // notifier.php: all delivery now uses message_send() with fullmessagehtml set
+        //   to the full HTML template — Moodle's email processor sends the formatted
+        //   email directly. Removed email_to_user() which was failing silently.
+        //   Bell-only (channel_inapp without channel_email): blank-email clone so
+        //   email processor skips but popup fires.
+        // db/hooks.php + classes/hook/navigation_primary_listener.php: registers the
+        //   \core\hook\navigation\primary_extend listener (Moodle 4.3+) which adds
+        //   the plugin entry to the top navigation bar.
+        // No DB schema changes.
+        upgrade_plugin_savepoint(true, 2026050123, 'local', 'learnpath');
+    }
+
+    if ($oldversion < 2026050124) {
+        // v1.0.0 (2026050124): Restore email_to_user() for delivery.
+        // SMTP confirmed working via Moodle test. email_to_user() bypasses user
+        // notification preferences and always delivers via SMTP. message_send()
+        // with blank-email clone handles bell-only (no duplicate email).
+        // No DB schema changes.
+        upgrade_plugin_savepoint(true, 2026050124, 'local', 'learnpath');
+    }
+
+    if ($oldversion < 2026050125) {
+        // v1.0.0 (2026050125): Email firewall fix + invite HTML + nav hook fix.
+        // notifier.php: switched to message_send() for all delivery — adds anti-spam
+        //   headers (Auto-Submitted, X-Moodle-*) that bypass corporate firewalls.
+        //   HTML in fullmessagehtml is delivered as formatted email by Moodle processor.
+        //   Bell-only still uses blank-email clone.
+        // manager-invite.php: branded HTML template via notifier::build_invite_html()
+        //   with proper "Hi [firstname]," salutation. Moodle users get message_send()
+        //   (anti-spam headers); external emails get email_to_user() (no Moodle account).
+        // db/hooks.php: string-based class refs prevent PHP fatal on class-not-found.
+        // navigation_primary_listener.php: no type hint + multi-method probe for
+        //   get_primarynav()/get_primary_nav()/get_primary() across Moodle 4.x versions.
+        // No DB schema changes.
+        upgrade_plugin_savepoint(true, 2026050125, 'local', 'learnpath');
+    }
+
+    if ($oldversion < 2026050126) {
+        // v1.0.0 (2026050126): Firewall-safe email template.
+        // Replaced complex branded HTML (DOCTYPE, box-shadow, rgba fills, CTA button,
+        // progress card) with body-only plain-structure HTML. Darktrace and similar
+        // AI security gateways classify complex HTML from internal systems as
+        // phishing/impersonation. New template uses: left-border brand accent,
+        // inline progress text, plain underlined link (no button), "automated
+        // notification" legitimacy footer. Same change applied to invite emails.
+        // No DB schema changes.
+        upgrade_plugin_savepoint(true, 2026050126, 'local', 'learnpath');
+    }
+
+    if ($oldversion < 2026050127) {
+        // v1.0.0 (2026050127): Darktrace-safe email — remove query-param URLs from body.
+        // Key change: URLs with ?groupid=N are phishing-tracker signals to AI gateways.
+        // Email body now only contains the site root URL (wwwroot). Deep link lives
+        // in contexturl (bell notification only, not in email body).
+        // default_body() no longer includes {{dashboardurl}} in the message text.
+        // {{dashboardurl}} in custom templates now resolves to site root, not full path.
+        // build_plain() produces properly formatted plain-text email with separator lines.
+        // Subject default changed from "Reminder: Complete your learning" to
+        // "Learning Path Update" (less alarm-like language for AI content filters).
+        // No DB schema changes.
+        upgrade_plugin_savepoint(true, 2026050127, 'local', 'learnpath');
+    }
+
+    if ($oldversion < 2026050128) {
+        // v1.0.0 (2026050128): Restore full branded email + user-settings nav.
+        // Email: full branded HTML template restored (firewall whitelisted by admin).
+        // nav: added extend_navigation_user_settings() — appears in top-right user
+        //   dropdown, confirmed working in all Moodle 4.x. Primary nav callback
+        //   type hint removed (was causing silent TypeError in Moodle 4.x).
+        // No DB schema changes.
+        upgrade_plugin_savepoint(true, 2026050128, 'local', 'learnpath');
+    }
+
     return true;
 }

@@ -39,7 +39,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && confirm_sesskey()) {
         'cert_title_font'=>PARAM_TEXT,'cert_body_font'=>PARAM_TEXT,'cert_org_name'=>PARAM_TEXT,
         'cert_signatory_title'=>PARAM_TEXT,'cert_footer_text'=>PARAM_TEXT,
         'cert_show_logo'=>PARAM_INT,'cert_show_signature'=>PARAM_INT,
-        'cert_show_date'=>PARAM_INT,'cert_show_ref'=>PARAM_INT,'cert_logo_path'=>PARAM_TEXT];
+        'cert_show_date'=>PARAM_INT,'cert_show_ref'=>PARAM_INT,
+        'cert_logo_pos'=>PARAM_TEXT,
+        'invite_expiry_hours'=>PARAM_INT,
+        // Email appearance settings
+        'email_signatory'=>PARAM_TEXT,'email_sig_title'=>PARAM_TEXT,
+        'email_replyto'=>PARAM_EMAIL,
+        'email_show_footer'=>PARAM_INT,'email_footer_text_custom'=>PARAM_TEXT,
+        'email_signature_html'=>PARAM_RAW,
+        // Block colors
+        'block_learner_color'=>PARAM_TEXT,'block_manager_color'=>PARAM_TEXT];
     foreach ($fields as $k => $type) {
         $val = optional_param($k, '', $type);
         if ($type === PARAM_INT && !isset($_POST[$k])) { $val = 0; }
@@ -109,7 +118,7 @@ $upload_url = (new moodle_url('/local/learnpath/logo_upload.php'))->out(false);
 $upload_sk  = sesskey();
 
 echo $OUTPUT->header();
-echo '<style>:root{--lt-primary:' . $brand . ';--lt-accent:' . $brand . '}</style>';
+echo local_learnpath_brand_css();
 echo '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px">';
 foreach ([['<- Welcome','/local/learnpath/welcome.php'],['Dashboard','/local/learnpath/index.php'],
           ['Manage','/local/learnpath/manage.php'],['Overview','/local/learnpath/overview.php']] as [$l,$u]) {
@@ -356,6 +365,161 @@ echo '<span style="font-size:.72rem;color:#9ca3af;font-family:var(--lt-font)">Up
 echo '</div><div class="lt-card-body" style="overflow-x:auto">';
 echo '<div id="lt-cert-preview" style="min-width:540px"></div>';
 echo '</div></div>';
+
+// 7. Email Appearance
+$email_signatory     = local_learnpath_branding_cfg('email_signatory', local_learnpath_branding_cfg('brand_name','LearnTrack'));
+$email_sig_title     = local_learnpath_branding_cfg('email_sig_title', '');
+$email_replyto       = local_learnpath_branding_cfg('email_replyto', '');
+$email_sig_html      = local_learnpath_branding_cfg('email_signature_html', '');
+$email_show_footer_raw = get_config('local_learnpath', 'email_show_footer');
+$email_show_footer   = ($email_show_footer_raw === false) ? 1 : (int)$email_show_footer_raw;
+$email_footer_custom = local_learnpath_branding_cfg('email_footer_text_custom', '');
+$sig_upload_url      = (new moodle_url('/local/learnpath/signature_upload.php'))->out(false);
+$sig_upload_sk       = sesskey();
+
+$eh  = local_learnpath_text_field('email_signatory', 'Signatory Name', $email_signatory, 'Name shown in the signature of all outgoing emails (e.g. "Michael Adeniran"). Used when no HTML signature is set.');
+$eh .= local_learnpath_text_field('email_sig_title', 'Signatory Title / Role', $email_sig_title, 'Shown below the name (e.g. "Learning & Development Manager"). Leave blank to hide.');
+$eh .= local_learnpath_text_field('email_replyto', 'Reply-To Email Address', $email_replyto, 'When recipients hit Reply, this address is used. Leave blank to use the site noreply address.');
+$eh .= local_learnpath_toggle_field('email_show_footer', 'Show Email Footer', 'Display a small footer line at the bottom of all emails', $email_show_footer);
+$eh .= local_learnpath_text_field('email_footer_text_custom', 'Custom Footer Text', $email_footer_custom, 'Text shown in the footer. Leave blank to use the Plugin Display Name. Uncheck "Show Footer" to hide entirely.');
+
+// ── Rich HTML Signature Editor ──────────────────────────────────────────────
+$eh .= '<div style="margin-top:20px;font-family:var(--lt-font)">';
+$eh .= '<label style="font-size:.74rem;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:6px">Email Signature (HTML)</label>';
+$eh .= '<div style="font-size:.76rem;color:#6b7280;margin-bottom:8px">Paste your Outlook signature or type HTML. Use the image button to upload and embed images inline. If set, this replaces the plain-text Signatory Name above.</div>';
+
+// Toolbar
+$eh .= '<div id="lt-sig-toolbar" style="display:flex;gap:5px;flex-wrap:wrap;padding:7px 10px;background:#f8fafc;border:1.5px solid #e5e7eb;border-bottom:none;border-radius:8px 8px 0 0">';
+foreach ([['<b>B</b>','bold'],['<i>I</i>','italic'],['<u>U</u>','underline']] as [$lbl,$cmd]) {
+    $eh .= '<button type="button" onclick="document.execCommand(\''.addslashes($cmd).'\',false,null)" style="font-family:var(--lt-font);font-size:.82rem;padding:3px 9px;border:1.5px solid #e5e7eb;border-radius:5px;background:#fff;cursor:pointer">'.$lbl.'</button>';
+}
+$eh .= '<button type="button" onclick="ltSigLink()" style="font-family:var(--lt-font);font-size:.82rem;padding:3px 9px;border:1.5px solid #e5e7eb;border-radius:5px;background:#fff;cursor:pointer" title="Insert link">🔗</button>';
+$eh .= '<label style="cursor:pointer;font-size:.82rem;padding:3px 10px;border:1.5px solid #e5e7eb;border-radius:5px;background:#fff;margin-left:4px" title="Upload image and insert at cursor">';
+$eh .= '🖼 Upload Image<input type="file" id="lt-sig-img-file" accept="image/png,image/jpeg,image/gif,image/svg+xml,image/webp" style="display:none"></label>';
+$eh .= '<span id="lt-sig-img-status" style="font-size:.74rem;color:#6b7280;padding:3px 6px;align-self:center"></span>';
+$eh .= '<div style="margin-left:auto;display:flex;gap:4px">';
+$eh .= '<button type="button" onclick="ltSigToggle(\'edit\')" id="lt-sig-btn-edit" style="font-family:var(--lt-font);font-size:.76rem;padding:3px 9px;border:1.5px solid var(--lt-accent);border-radius:5px;background:var(--lt-accent);color:#fff;cursor:pointer">Visual</button>';
+$eh .= '<button type="button" onclick="ltSigToggle(\'html\')" id="lt-sig-btn-html" style="font-family:var(--lt-font);font-size:.76rem;padding:3px 9px;border:1.5px solid #e5e7eb;border-radius:5px;background:#fff;cursor:pointer">HTML Source</button>';
+$eh .= '</div>';
+$eh .= '</div>';
+
+// Contenteditable editor
+$eh .= '<div id="lt-sig-editor" contenteditable="true" '
+    . 'style="min-height:140px;padding:14px;border:1.5px solid #e5e7eb;border-radius:0 0 8px 8px;'
+    . 'font-family:Arial,sans-serif;font-size:14px;line-height:1.5;background:#fff;outline:none;overflow-y:auto;max-height:300px">'
+    . $email_sig_html  // current signature HTML
+    . '</div>';
+
+// HTML source textarea (hidden by default)
+$eh .= '<textarea id="lt-sig-source" style="display:none;width:100%;min-height:140px;max-height:300px;padding:12px;border:1.5px solid #e5e7eb;border-radius:0 0 8px 8px;font-family:monospace;font-size:.82rem;resize:vertical;outline:none;box-sizing:border-box">'
+    . htmlspecialchars($email_sig_html) . '</textarea>';
+
+// Hidden form field
+$eh .= '<input type="hidden" name="email_signature_html" id="lt-sig-hidden" value="' . s($email_sig_html) . '">';
+$eh .= '<div style="font-size:.72rem;color:#9ca3af;margin-top:5px">Tip: Copy your Outlook signature (Ctrl+C in Outlook), then paste here (Ctrl+V). Images will be retained as-is, or use the Upload button to host images on this server.</div>';
+$eh .= '</div>';
+
+// Signature editor JS (inline, not via js_init_code to allow immediate interaction)
+$eh .= '<script>
+(function(){
+var editor = document.getElementById("lt-sig-editor");
+var source = document.getElementById("lt-sig-source");
+var hidden = document.getElementById("lt-sig-hidden");
+var btnEdit = document.getElementById("lt-sig-btn-edit");
+var btnHtml = document.getElementById("lt-sig-btn-html");
+var isHtml = false;
+
+window.ltSigToggle = function(mode){
+    if(mode === "html"){
+        source.value = editor.innerHTML;
+        editor.style.display="none";
+        source.style.display="block";
+        btnEdit.style.background="#fff"; btnEdit.style.color="#374151"; btnEdit.style.borderColor="#e5e7eb";
+        btnHtml.style.background="var(--lt-accent,#1e3a5f)"; btnHtml.style.color="#fff"; btnHtml.style.borderColor="var(--lt-accent,#1e3a5f)";
+        isHtml = true;
+    } else {
+        editor.innerHTML = source.value;
+        source.style.display="none";
+        editor.style.display="block";
+        btnHtml.style.background="#fff"; btnHtml.style.color="#374151"; btnHtml.style.borderColor="#e5e7eb";
+        btnEdit.style.background="var(--lt-accent,#1e3a5f)"; btnEdit.style.color="#fff"; btnEdit.style.borderColor="var(--lt-accent,#1e3a5f)";
+        isHtml = false;
+    }
+};
+
+window.ltSigLink = function(){
+    var url = prompt("Enter URL:");
+    if(url){ document.execCommand("createLink",false,url); }
+};
+
+// Sync to hidden field before form submit
+var form = editor.closest("form");
+if(form){ form.addEventListener("submit", function(){
+    hidden.value = isHtml ? source.value : editor.innerHTML;
+}); }
+
+// Also sync on any editor change
+editor.addEventListener("input", function(){ hidden.value = editor.innerHTML; });
+source.addEventListener("input", function(){ hidden.value = source.value; });
+
+// Image upload
+var imgFile = document.getElementById("lt-sig-img-file");
+var imgStatus = document.getElementById("lt-sig-img-status");
+if(imgFile){ imgFile.addEventListener("change", function(){
+    var f = this.files[0]; if(!f) return;
+    if(f.size > 2097152){ imgStatus.textContent="Too large (max 2MB)"; imgStatus.style.color="#be123c"; return; }
+    var fd = new FormData(); fd.append("sigimage",f); fd.append("sesskey","' . $sig_upload_sk . '");
+    imgStatus.textContent="Uploading..."; imgStatus.style.color="#6b7280";
+    fetch("' . s($sig_upload_url) . '",{method:"POST",body:fd})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+        if(d.ok){
+            imgStatus.textContent="Inserted ✓"; imgStatus.style.color="#10b981";
+            // Insert image at current cursor position
+            editor.focus();
+            var img = "<img src=\\"" + d.url + "\\" style=\\"max-height:80px;max-width:300px;\\">";
+            document.execCommand("insertHTML",false,img);
+            hidden.value = editor.innerHTML;
+        } else { imgStatus.textContent=d.error||"Failed"; imgStatus.style.color="#be123c"; }
+    });
+    this.value = "";
+}); }
+})();
+</script>';
+
+local_learnpath_cert_card('Email Appearance & Signature', $eh);
+
+// 8. Block Design Colours
+$block_learner_color = local_learnpath_branding_cfg('block_learner_color', $brand);
+$block_manager_color = local_learnpath_branding_cfg('block_manager_color', '#5b21b6');
+
+$bh  = '<div style="font-size:.8rem;color:#6b7280;margin-bottom:14px;font-family:var(--lt-font)">These colours apply to the <strong>My Learning Paths</strong> block on the Moodle dashboard. Changes take effect on the next page load.</div>';
+$bh .= '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;font-family:var(--lt-font)">';
+foreach ([
+    ['block_learner_color', 'ltb-lc', 'Learner Section Colour', $block_learner_color],
+    ['block_manager_color', 'ltb-mc', 'Manager Section Colour',  $block_manager_color],
+] as [$n, $id, $lbl, $v]) {
+    $bh .= '<div>';
+    $bh .= '<label style="font-size:.74rem;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:5px">' . $lbl . '</label>';
+    $bh .= '<div style="display:flex;align-items:center;gap:10px">';
+    $bh .= '<input type="color" name="' . $n . '" id="' . $id . '" value="' . s($v) . '"'
+        . ' oninput="document.getElementById(\'lt-blk-preview\').style.setProperty(\'--prev-' . $id . '\',this.value)"'
+        . ' style="width:44px;height:34px;border:1.5px solid #e5e7eb;border-radius:6px;padding:2px;cursor:pointer">';
+    $bh .= '<span style="font-size:.8rem;color:#6b7280">' . s($v) . '</span>';
+    $bh .= '</div></div>';
+}
+$bh .= '</div>';
+// Mini block preview
+$bh .= '<div id="lt-blk-preview" style="margin-top:16px;border:1.5px solid #e5e7eb;border-radius:10px;overflow:hidden;max-width:280px;--prev-ltb-lc:' . s($block_learner_color) . ';--prev-ltb-mc:' . s($block_manager_color) . '">';
+$bh .= '<div style="background:linear-gradient(135deg,#0f172a,var(--prev-ltb-lc));padding:10px 12px;color:#fff;font-size:.78rem;font-weight:700">&#128218; My Learning Paths</div>';
+$bh .= '<div style="padding:10px 12px;background:#fff">';
+$bh .= '<div style="font-size:.64rem;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--prev-ltb-mc);margin-bottom:5px">&#9878; Paths I Manage</div>';
+$bh .= '<div style="background:var(--prev-ltb-lc);opacity:.12;height:28px;border-radius:6px;margin-bottom:6px"></div>';
+$bh .= '<div style="font-size:.64rem;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--prev-ltb-lc);margin-bottom:5px">&#128218; My Learning Paths</div>';
+$bh .= '<div style="background:var(--prev-ltb-lc);opacity:.1;height:28px;border-radius:6px;margin-bottom:4px"></div>';
+$bh .= '<div style="background:var(--prev-ltb-lc);opacity:.07;height:28px;border-radius:6px"></div>';
+$bh .= '</div></div>';
+local_learnpath_cert_card('Block Design Colours', $bh);
 
 echo '<div style="display:flex;gap:10px;padding:14px 0;border-top:1px solid #e5e7eb">';
 echo '<button type="submit" class="lt-btn lt-btn-primary">Save Branding Settings</button>';

@@ -25,6 +25,13 @@ use local_learnpath\data\helper as DH;
 
 require_login();
 $ctx = context_system::instance();
+
+// If a non-admin lands here with a token, redirect them to the public acceptance page
+$token_redirect = optional_param('token', '', PARAM_ALPHANUM);
+if ($token_redirect && !has_capability('local/learnpath:manage', $ctx)) {
+    redirect(new moodle_url('/local/learnpath/invite-accept.php', ['token' => $token_redirect]));
+}
+
 require_capability('local/learnpath:manage', $ctx);
 
 global $DB, $USER, $OUTPUT, $CFG;
@@ -42,45 +49,10 @@ $DB->execute(
     ['cutoff' => time() - ($expiry_h * 3600)]
 );
 
-// Handle accept token (manager clicks link in email)
-$token = optional_param('token', '', PARAM_ALPHANUM);
-if ($token) {
-    $expiry_hours = (int)(get_config('local_learnpath', 'invite_expiry_hours') ?: 24);
-    $invite = $DB->get_record('local_learnpath_mgr_invites',
-        ['token' => $token, 'status' => 'pending']);
-    // Check expiry
-    if ($invite && (time() - $invite->timecreated) > ($expiry_hours * 3600)) {
-        $DB->update_record('local_learnpath_mgr_invites', (object)[
-            'id' => $invite->id, 'status' => 'expired',
-        ]);
-        $invite = null;
-    }
-    if ($invite) {
-        // Find or create the user by email
-        $mgr_user = $DB->get_record('user', ['email' => $invite->email, 'deleted' => 0]);
-        if ($mgr_user) {
-            // Add as manager
-            if (!$DB->record_exists('local_learnpath_managers',
-                    ['groupid' => $invite->groupid, 'userid' => $mgr_user->id])) {
-                $DB->insert_record('local_learnpath_managers', (object)[
-                    'groupid' => $invite->groupid,
-                    'userid'  => $mgr_user->id,
-                    'scope'   => 'all',
-                ]);
-            }
-            $DB->update_record('local_learnpath_mgr_invites', (object)[
-                'id'           => $invite->id,
-                'status'       => 'accepted',
-                'timeaccepted' => time(),
-            ]);
-            redirect(
-                new moodle_url('/local/learnpath/index.php', ['groupid' => $invite->groupid]),
-                'You now have manager access to: ' . format_string($group->name),
-                null, \core\output\notification::NOTIFY_SUCCESS
-            );
-        }
-    }
-    redirect(new moodle_url('/local/learnpath/manage.php'), 'Invite link invalid or already used.');
+// Any token in the URL (old email links, new notification links) → go to the public acceptance page
+$token_any = optional_param('token', '', PARAM_ALPHANUM);
+if ($token_any) {
+    redirect(new moodle_url('/local/learnpath/invite-accept.php', ['token' => $token_any]));
 }
 
 // Handle POST: send invites
@@ -112,49 +84,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && confirm_sesskey()) {
             'timecreated' => time(),
         ]);
 
-        $accept_url = (new moodle_url('/local/learnpath/manager-invite.php', [
-            'groupid' => $groupid,
-            'token'   => $token_val,
+        // Public acceptance URL — no admin capability required
+        $accept_url = (new moodle_url('/local/learnpath/invite-accept.php', [
+            'token' => $token_val,
         ]))->out(false);
 
-        $brand_name = get_config('local_learnpath', 'brand_name') ?: 'LearnTrack';
-        $inviter    = fullname($USER);
-        $subject    = $brand_name . ': You have been invited to manage "' . format_string($group->name) . '"';
+        $brand_name  = get_config('local_learnpath', 'brand_name') ?: 'LearnTrack';
+        $inviter     = fullname($USER);
+        $subject     = $brand_name . ': You have been invited to manage "' . format_string($group->name) . '"';
         $expiry_note = "This invitation link expires in {$expiry_h} hours if not accepted.";
-    $body_plain = "Hi,\n\n{$inviter} has invited you to be a manager for the learning path: \"{$group->name}\".\n\nAs a manager, you can view learner progress, send reminders, and view reports for this path.\n\nClick the link below to accept:\n{$accept_url}\n\n{$expiry_note}\n\nRegards,\n{$brand_name}";
-        $body_html  = '<p>Hi,</p>'
-            . '<p><strong>' . htmlspecialchars($inviter) . '</strong> has invited you to be a manager for the learning path: <strong>' . format_string($group->name) . '</strong>.</p>'
-            . '<p>As a manager, you can view learner progress, send reminders, and generate reports.</p>'
-            . '<p><a href="' . $accept_url . '" style="display:inline-block;background:' . $brand . ';color:#fff;padding:10px 22px;border-radius:8px;text-decoration:none;font-weight:700">Accept Invitation</a></p>'
-            . '<p style="font-size:.84rem;color:#6b7280">Or copy this link: ' . $accept_url . '</p>'
-            . '<p>Regards,<br>' . htmlspecialchars($brand_name) . '</p>';
+        $body_plain  = "Hi,\n\n{$inviter} has invited you to be a manager for the learning path: \"{$group->name}\".\n\nAs a manager, you can view learner progress, send reminders, and view reports for this path.\n\nClick the link below to accept:\n{$accept_url}\n\n{$expiry_note}\n\nRegards,\n{$brand_name}";
+        // Branded HTML template (same look as reminder emails).
+        // Pass the invitee's first name so the salutation reads "Hi John," not just "Hi,"
+        $invitee_firstname = $existing_user ? $existing_user->firstname : '';
+        $body_html = \local_learnpath\notification\notifier::build_invite_html(
+            $inviter, format_string($group->name), $accept_url, $expiry_note, $invitee_firstname
+        );
 
-        // Send email
-        $to_user = \core_user::get_noreply_user();
-        $to_user->email     = $email;
-        $to_user->firstname = '';
-        $to_user->lastname  = $email;
-        $noreply = \core_user::get_noreply_user();
-        $noreply->firstname = $brand_name;
-        $noreply->lastname  = '';
-        email_to_user($to_user, $noreply, $subject, $body_plain, $body_html);
-
-        // In-app notification to the user if they exist in Moodle
+        // For Moodle users: message_send() carries proper anti-spam headers
+        // (Auto-Submitted, X-Moodle-*, List-Unsubscribe) that keep it out of firewalls.
         if ($existing_user) {
             $msg = new \core\message\message();
-            $msg->component       = 'local_learnpath';
-            $msg->name            = 'learntrack_reminder';
-            $msg->userfrom        = $USER;
-            $msg->userto          = $existing_user;
-            $msg->subject         = $subject;
-            $msg->fullmessage     = $body_plain;
+            $msg->component         = 'local_learnpath';
+            $msg->name              = 'learntrack_reminder';
+            $msg->userfrom          = $USER;
+            $msg->userto            = $existing_user;   // real user → email + popup
+            $msg->subject           = $subject;
+            $msg->fullmessage       = $body_plain;
             $msg->fullmessageformat = FORMAT_PLAIN;
-            $msg->fullmessagehtml = $body_html;
-            $msg->smallmessage    = 'Manager invite: ' . format_string($group->name);
-            $msg->notification    = 1;
-            $msg->contexturl      = $accept_url;
-            $msg->contexturlname  = 'Accept Invitation';
+            $msg->fullmessagehtml   = $body_html;
+            $msg->smallmessage      = 'Manager invite: ' . format_string($group->name);
+            $msg->notification      = 1;
+            $msg->contexturl        = $accept_url;
+            $msg->contexturlname    = 'Accept Invitation';
             message_send($msg);
+        } else {
+            // External email (not a Moodle account): fall back to email_to_user.
+            $to_user            = \core_user::get_noreply_user();
+            $to_user->email     = $email;
+            $to_user->firstname = '';
+            $to_user->lastname  = $email;
+            $noreply            = \core_user::get_noreply_user();
+            $noreply->firstname = $brand_name;
+            $noreply->lastname  = '';
+            email_to_user($to_user, $noreply, $subject, $body_plain, $body_html);
         }
         $sent++;
     }
@@ -178,6 +151,53 @@ if ($revoke_id && confirm_sesskey()) {
         new moodle_url('/local/learnpath/manager-invite.php', ['groupid' => $groupid]),
         'Invitation revoked.'
     );
+}
+
+// Handle resend (expired or pending invites)
+$resend_id = optional_param('resend', 0, PARAM_INT);
+if ($resend_id && confirm_sesskey()) {
+    $old_inv = $DB->get_record('local_learnpath_mgr_invites', ['id' => $resend_id, 'groupid' => $groupid]);
+    if ($old_inv && in_array($old_inv->status, ['expired', 'pending', 'revoked'])) {
+        $new_token = bin2hex(random_bytes(24));
+        $DB->update_record('local_learnpath_mgr_invites', (object)[
+            'id'          => $old_inv->id,
+            'token'       => $new_token,
+            'status'      => 'pending',
+            'timecreated' => time(),
+        ]);
+        $accept_url_resend = (new moodle_url('/local/learnpath/invite-accept.php', ['token' => $new_token]))->out(false);
+        $brand_name_r  = get_config('local_learnpath', 'brand_name') ?: 'LearnTrack';
+        $inviter_r     = fullname($USER);
+        $subject_r     = $brand_name_r . ': You have been invited to manage "' . format_string($group->name) . '"';
+        $expiry_note_r = "This invitation link expires in {$expiry_h} hours if not accepted.";
+        $existing_r    = $DB->get_record('user', ['email' => $old_inv->email, 'deleted' => 0]);
+        $invitee_fn_r  = $existing_r ? $existing_r->firstname : '';
+        $plain_r = ($invitee_fn_r ? "Hi {$invitee_fn_r},\n\n" : "Hi,\n\n")
+            . "{$inviter_r} has re-sent your invitation to manage \"{$group->name}\".\n\nAccept here: {$accept_url_resend}\n\n{$expiry_note_r}\n\nRegards,\n{$brand_name_r}";
+        $html_r = \local_learnpath\notification\notifier::build_invite_html(
+            $inviter_r, format_string($group->name), $accept_url_resend, $expiry_note_r, $invitee_fn_r
+        );
+        if ($existing_r) {
+            // Moodle user: message_send adds anti-spam headers, delivers email + popup.
+            $msg_r = new \core\message\message();
+            $msg_r->component = 'local_learnpath'; $msg_r->name = 'learntrack_reminder';
+            $msg_r->userfrom = $USER; $msg_r->userto = $existing_r;
+            $msg_r->subject = $subject_r; $msg_r->fullmessage = $plain_r;
+            $msg_r->fullmessageformat = FORMAT_PLAIN; $msg_r->fullmessagehtml = $html_r;
+            $msg_r->smallmessage = 'Manager invite (resent): ' . format_string($group->name);
+            $msg_r->notification = 1; $msg_r->contexturl = $accept_url_resend;
+            $msg_r->contexturlname = 'Accept Invitation';
+            message_send($msg_r);
+        } else {
+            // External email (no Moodle account): use email_to_user directly.
+            $to_user_r = \core_user::get_noreply_user();
+            $to_user_r->email = $old_inv->email; $to_user_r->firstname = ''; $to_user_r->lastname = $old_inv->email;
+            $noreply_r = \core_user::get_noreply_user(); $noreply_r->firstname = $brand_name_r; $noreply_r->lastname = '';
+            email_to_user($to_user_r, $noreply_r, $subject_r, $plain_r, $html_r);
+        }
+        redirect(new moodle_url('/local/learnpath/manager-invite.php', ['groupid' => $groupid]),
+            'Invitation resent to ' . s($old_inv->email) . '.', null, \core\output\notification::NOTIFY_SUCCESS);
+    }
 }
 
 // ── Page output ───────────────────────────────────────────────────────────────
@@ -263,19 +283,25 @@ if (empty($invites)) {
         echo '<td>' . $status_badge . '</td>';
         echo '<td style="font-size:.78rem;color:#6b7280">' . userdate($inv->timecreated, get_string('strftimedatefullshort')) . '</td>';
         echo '<td style="font-size:.78rem;color:#6b7280">' . $accepted . '</td>';
-        echo '<td>';
+        echo '<td style="white-space:nowrap">';
+        $accept_url_show = (new moodle_url('/local/learnpath/invite-accept.php', ['token' => $inv->token]))->out(false);
         if ($inv->status === 'pending') {
             $rev_url = new moodle_url('/local/learnpath/manager-invite.php', [
                 'groupid' => $groupid, 'revoke' => $inv->id, 'sesskey' => sesskey(),
             ]);
-            $accept_url_show = (new moodle_url('/local/learnpath/manager-invite.php', [
-                'groupid' => $groupid, 'token' => $inv->token,
-            ]))->out(false);
             echo html_writer::link($rev_url, 'Revoke',
-                ['style' => 'font-size:.76rem;color:#be123c;text-decoration:none',
+                ['style' => 'font-size:.76rem;color:#be123c;text-decoration:none;margin-right:6px',
                  'onclick' => "return confirm('Revoke this invitation?')"]);
-            echo ' <button onclick="navigator.clipboard.writeText(\'' . s($accept_url_show) . '\');this.textContent=\'Copied!\';"'
-                . ' style="font-size:.72rem;background:#eff6ff;color:#1e40af;border:none;border-radius:4px;padding:2px 7px;cursor:pointer">Copy Link</button>';
+            echo '<button onclick="navigator.clipboard.writeText(\'' . s($accept_url_show) . '\');this.textContent=\'Copied!\';"'
+                . ' style="font-size:.72rem;background:#eff6ff;color:#1e40af;border:none;border-radius:4px;padding:2px 7px;cursor:pointer;margin-right:4px">Copy Link</button>';
+        }
+        if (in_array($inv->status, ['expired', 'revoked'])) {
+            $resend_url = new moodle_url('/local/learnpath/manager-invite.php', [
+                'groupid' => $groupid, 'resend' => $inv->id, 'sesskey' => sesskey(),
+            ]);
+            echo html_writer::link($resend_url, '&#128257; Resend',
+                ['style' => 'font-size:.76rem;color:#1e40af;text-decoration:none;font-weight:700',
+                 'onclick' => "return confirm('Resend invitation to " . s($inv->email) . "?')"]);
         }
         echo '</td></tr>';
     }

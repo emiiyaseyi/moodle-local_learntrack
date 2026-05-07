@@ -17,6 +17,17 @@ defined('MOODLE_INTERNAL') || die();
  */
 class helper {
 
+    // ── TABLE-EXISTS CACHE ────────────────────────────────────────────────────
+    private static array $tbl_cache = [];
+
+    private static function tbl_exists(string $table): bool {
+        if (!array_key_exists($table, self::$tbl_cache)) {
+            global $DB;
+            self::$tbl_cache[$table] = $DB->get_manager()->table_exists(new \xmldb_table($table));
+        }
+        return self::$tbl_cache[$table];
+    }
+
     // ── GROUPS ────────────────────────────────────────────────────────────────
 
     public static function get_groups(int $userid = 0): array {
@@ -106,8 +117,7 @@ class helper {
         $learners = $DB->get_records_sql($sql, $params);
 
         // Check for individually assigned users
-        $dbman = $DB->get_manager();
-        if ($dbman->table_exists(new \xmldb_table('local_learnpath_user_assign'))) {
+        if (self::tbl_exists('local_learnpath_user_assign')) {
             $assigned_count = $DB->count_records('local_learnpath_user_assign', ['groupid' => $groupid]);
             if ($assigned_count > 0) {
                 // Path has explicit user selection — RESTRICT to only those users
@@ -242,12 +252,15 @@ class helper {
 
     /**
      * Get full per-course detail for all learners in a group.
+     * Uses 4 bulk queries instead of N×M×5 individual queries.
      */
     public static function get_progress_detail(
         int    $groupid,
         int    $viewerid,
         string $user_status = 'active'
     ): array {
+        global $DB;
+
         $courses  = self::get_group_courses($groupid);
         $learners = self::get_learners_for_group($groupid, $viewerid, $user_status);
 
@@ -255,30 +268,180 @@ class helper {
             return [];
         }
 
+        $courseids  = array_keys($courses);
+        $learnerids = array_keys($learners);
+
+        list($cins, $cps) = $DB->get_in_or_equal($courseids,  SQL_PARAMS_NAMED, 'c');
+        list($uins, $ups) = $DB->get_in_or_equal($learnerids, SQL_PARAMS_NAMED, 'u');
+        $cup = array_merge($cps, $ups);
+
+        // Bulk 1: formal course completions
+        $cc_map = [];
+        foreach ($DB->get_records_sql(
+            "SELECT userid, course AS courseid, timecompleted
+             FROM {course_completions}
+             WHERE course $cins AND userid $uins AND timecompleted > 0",
+            $cup
+        ) as $r) {
+            $cc_map[(int)$r->userid][(int)$r->courseid] = (int)$r->timecompleted;
+        }
+
+        // Bulk 2: total completion-tracked activities per course
+        $total_map = [];
+        foreach ($DB->get_records_sql(
+            "SELECT course AS courseid, COUNT(id) AS cnt
+             FROM {course_modules}
+             WHERE course $cins AND completion > 0 AND deletioninprogress = 0
+             GROUP BY course",
+            $cps
+        ) as $r) {
+            $total_map[(int)$r->courseid] = (int)$r->cnt;
+        }
+
+        // Bulk 3: completed activities per user per course
+        $done_map = [];
+        foreach ($DB->get_records_sql(
+            "SELECT cm.course AS courseid, cmc.userid, COUNT(cmc.id) AS cnt
+             FROM {course_modules_completion} cmc
+             JOIN {course_modules} cm ON cm.id = cmc.coursemoduleid
+             WHERE cm.course $cins AND cmc.userid $uins
+               AND cm.completion > 0 AND cm.deletioninprogress = 0
+               AND cmc.completionstate IN (1,2)
+             GROUP BY cm.course, cmc.userid",
+            $cup
+        ) as $r) {
+            $done_map[(int)$r->userid][(int)$r->courseid] = (int)$r->cnt;
+        }
+
+        // Bulk 4: first/last access from log (last 365 days for performance)
+        $log_map = [];
+        try {
+            $log_cutoff = time() - (365 * 86400);
+            foreach ($DB->get_records_sql(
+                "SELECT userid, courseid,
+                        MIN(timecreated) AS firstaccess, MAX(timecreated) AS lastaccess
+                 FROM {logstore_standard_log}
+                 WHERE courseid $cins AND userid $uins
+                   AND action = 'viewed' AND timecreated > :lcut
+                 GROUP BY userid, courseid",
+                array_merge($cup, ['lcut' => $log_cutoff])
+            ) as $r) {
+                $log_map[(int)$r->userid][(int)$r->courseid] = $r;
+            }
+        } catch (\Throwable $e) {
+            // logstore may be disabled; silently skip
+        }
+
+        // Build result rows from pre-fetched maps — zero additional queries
         $rows = [];
         foreach ($learners as $learner) {
             foreach ($courses as $course) {
-                $progress = self::get_course_progress($learner->id, $course->id);
-                $progress->userid     = $learner->id;
-                $progress->firstname  = $learner->firstname;
-                $progress->lastname   = $learner->lastname;
-                $progress->email      = $learner->email;
-                $progress->username   = $learner->username;
-                $progress->coursename = $course->fullname;
-                $rows[] = $progress;
+                $uid = (int)$learner->id;
+                $cid = (int)$course->id;
+
+                $row              = new \stdClass();
+                $row->userid      = $uid;
+                $row->firstname   = $learner->firstname;
+                $row->lastname    = $learner->lastname;
+                $row->email       = $learner->email;
+                $row->username    = $learner->username;
+                $row->courseid    = $cid;
+                $row->coursename  = $course->fullname;
+                $row->timecompleted        = $cc_map[$uid][$cid] ?? null;
+                $row->completed            = (bool)$row->timecompleted;
+                $row->total_activities     = $total_map[$cid] ?? 0;
+                $row->completed_activities = $done_map[$uid][$cid] ?? 0;
+                $log              = $log_map[$uid][$cid] ?? null;
+                $row->firstaccess = $log ? (int)$log->firstaccess : null;
+                $row->lastaccess  = $log ? (int)$log->lastaccess  : null;
+                $row->grade       = null;
+                $row->maxgrade    = null;
+
+                // Progress
+                if ($row->completed) {
+                    $row->progress = 100;
+                } elseif ($row->total_activities > 0 && $row->completed_activities >= $row->total_activities) {
+                    $row->progress  = 100;
+                    $row->completed = true;
+                } elseif ($row->total_activities > 0) {
+                    $row->progress = min((int)round($row->completed_activities / $row->total_activities * 100), 99);
+                } else {
+                    $row->progress = 0;
+                }
+
+                // Status
+                if ($row->completed || $row->progress === 100) {
+                    $row->status   = 'complete';
+                    $row->progress = 100;
+                } elseif ($row->progress > 0 || $row->firstaccess) {
+                    $row->status = 'inprogress';
+                } else {
+                    $row->status = 'notstarted';
+                }
+
+                $rows[] = $row;
             }
         }
         return $rows;
     }
 
     /**
-     * Summarise progress: one row per learner across all courses in the group.
+     * Summarise progress: one row per learner.
+     * Uses the progress cache when available (instant); falls back to bulk live calculation.
      */
     public static function get_progress_summary(
         int    $groupid,
         int    $viewerid,
         string $user_status = 'active'
     ): array {
+        global $DB;
+
+        // Fast path: read from pre-computed progress cache
+        if (self::tbl_exists('local_learnpath_progress_cache')) {
+            $susp = '';
+            if ($user_status === 'active' || $user_status === 'inactive') {
+                $susp = ' AND u.suspended = 0';
+            } elseif ($user_status === 'suspended') {
+                $susp = ' AND u.suspended = 1';
+            }
+            $rows = $DB->get_records_sql(
+                "SELECT lpc.userid, lpc.completed_courses, lpc.total_courses,
+                        lpc.overall_progress, lpc.firstaccess, lpc.lastaccess,
+                        u.firstname, u.lastname, u.email, u.username
+                 FROM {local_learnpath_progress_cache} lpc
+                 JOIN {user} u ON u.id = lpc.userid
+                 WHERE lpc.groupid = :gid AND u.deleted = 0{$susp}
+                 ORDER BY u.lastname ASC, u.firstname ASC",
+                ['gid' => $groupid]
+            );
+            if (!empty($rows)) {
+                $inactive_days = (int)\get_config('local_learnpath', 'inactive_days');
+                $cutoff = $inactive_days > 0 ? time() - ($inactive_days * 86400) : 0;
+                $result = [];
+                foreach ($rows as $r) {
+                    if ($user_status === 'inactive' && $cutoff > 0) {
+                        if ($r->lastaccess && (int)$r->lastaccess >= $cutoff) continue;
+                    }
+                    $done = (int)$r->completed_courses;
+                    $tot  = (int)$r->total_courses;
+                    $r->inprogress_courses = max(0, $tot - $done);
+                    $r->notstarted_courses = 0;
+                    $r->status_sort = $r->overall_progress >= 100 ? 'complete'
+                        : ($r->overall_progress > 0 ? 'inprogress' : 'notstarted');
+                    $result[] = $r;
+                }
+                if (!empty($result)) return $result;
+            }
+        }
+
+        // Fallback: live bulk calculation
+        return self::_live_summary($groupid, $viewerid, $user_status);
+    }
+
+    /**
+     * Live summary calculation (fallback when cache is empty/unavailable).
+     */
+    private static function _live_summary(int $groupid, int $viewerid, string $user_status): array {
         $detail  = self::get_progress_detail($groupid, $viewerid, $user_status);
         $courses = self::get_group_courses($groupid);
         $total   = count($courses);
@@ -306,7 +469,6 @@ class helper {
             if ($row->status === 'complete')   { $s->completed_courses++; }
             if ($row->status === 'inprogress') { $s->inprogress_courses++; }
             if ($row->status === 'notstarted') { $s->notstarted_courses++; }
-
             if ($row->firstaccess && (!$s->firstaccess || $row->firstaccess < $s->firstaccess)) {
                 $s->firstaccess = $row->firstaccess;
             }
@@ -314,7 +476,6 @@ class helper {
                 $s->lastaccess = $row->lastaccess;
             }
         }
-
         foreach ($summary as $s) {
             if ($s->completed_courses >= $s->total_courses && $s->total_courses > 0) {
                 $s->overall_progress = 100;
@@ -322,8 +483,87 @@ class helper {
                 $s->overall_progress = (int)round(($s->completed_courses / $s->total_courses) * 100);
             }
         }
-
         return array_values($summary);
+    }
+
+    /**
+     * Get progress for a single user across multiple groups.
+     * Used by the block — one cache query instead of full N×M detail per group.
+     */
+    public static function get_user_path_progress(int $userid, array $groupids): array {
+        global $DB;
+        if (empty($groupids)) return [];
+
+        // Fast path: batch cache lookup
+        if (self::tbl_exists('local_learnpath_progress_cache')) {
+            list($gidin, $gidps) = $DB->get_in_or_equal($groupids, SQL_PARAMS_NAMED, 'g');
+            $rows = $DB->get_records_sql(
+                "SELECT groupid, completed_courses, total_courses, overall_progress,
+                        firstaccess, lastaccess
+                 FROM {local_learnpath_progress_cache}
+                 WHERE userid = :uid AND groupid $gidin",
+                array_merge(['uid' => $userid], $gidps)
+            );
+            if (!empty($rows)) {
+                $result = [];
+                foreach ($rows as $r) { $result[(int)$r->groupid] = $r; }
+                return $result;
+            }
+        }
+
+        // Fallback: per-group bulk query for this user only (3 queries per group)
+        $result = [];
+        foreach ($groupids as $gid) {
+            $courses = self::get_group_courses($gid);
+            if (empty($courses)) {
+                $result[$gid] = (object)['completed_courses'=>0,'total_courses'=>0,'overall_progress'=>0];
+                continue;
+            }
+            $courseids = array_keys($courses);
+            list($cins, $cps) = $DB->get_in_or_equal($courseids, SQL_PARAMS_NAMED, 'c');
+
+            $cc_done = $DB->get_fieldset_sql(
+                "SELECT course FROM {course_completions}
+                 WHERE course $cins AND userid = :uid AND timecompleted > 0",
+                array_merge($cps, ['uid' => $userid])
+            );
+            $cc_set = array_flip($cc_done);
+
+            $total_map = [];
+            foreach ($DB->get_records_sql(
+                "SELECT course AS courseid, COUNT(id) AS cnt FROM {course_modules}
+                 WHERE course $cins AND completion > 0 AND deletioninprogress = 0
+                 GROUP BY course", $cps) as $r) {
+                $total_map[(int)$r->courseid] = (int)$r->cnt;
+            }
+            $done_map = [];
+            foreach ($DB->get_records_sql(
+                "SELECT cm.course AS courseid, COUNT(cmc.id) AS cnt
+                 FROM {course_modules_completion} cmc
+                 JOIN {course_modules} cm ON cm.id = cmc.coursemoduleid
+                 WHERE cm.course $cins AND cmc.userid = :uid
+                   AND cm.completion > 0 AND cm.deletioninprogress = 0
+                   AND cmc.completionstate IN (1,2)
+                 GROUP BY cm.course",
+                array_merge($cps, ['uid' => $userid])) as $r) {
+                $done_map[(int)$r->courseid] = (int)$r->cnt;
+            }
+
+            $done = 0; $tot = count($courses);
+            foreach ($courses as $c) {
+                $cid = (int)$c->id;
+                $ta  = $total_map[$cid] ?? 0;
+                $da  = $done_map[$cid]  ?? 0;
+                if (isset($cc_set[$cid]) || ($ta > 0 && $da >= $ta)) $done++;
+            }
+            $pct = $tot > 0 ? (int)round($done / $tot * 100) : 0;
+            $result[$gid] = (object)[
+                'completed_courses' => $done,
+                'total_courses'     => $tot,
+                'overall_progress'  => $pct,
+            ];
+        }
+        return $result;
     }
 
     // ── CACHE ─────────────────────────────────────────────────────────────────
@@ -451,7 +691,7 @@ class helper {
 
         // Avg progress from cache — safe check (table may not exist on old installs)
         $stats->avg_progress = null;
-        if ($dbman->table_exists(new \xmldb_table('local_learnpath_progress_cache'))) {
+        if (self::tbl_exists('local_learnpath_progress_cache')) {
             $row = $DB->get_record_sql("SELECT AVG(overall_progress) AS avg_pct FROM {local_learnpath_progress_cache}");
             $stats->avg_progress = ($row && $row->avg_pct !== null) ? (int)round((float)$row->avg_pct) : null;
         }
@@ -468,8 +708,7 @@ class helper {
         global $DB;
 
         // Guard: if group_courses table missing, return empty
-        $dbman = $DB->get_manager();
-        if (!$dbman->table_exists(new \xmldb_table('local_learnpath_group_courses'))) {
+        if (!self::tbl_exists('local_learnpath_group_courses')) {
             return [];
         }
 
@@ -591,8 +830,7 @@ class helper {
     public static function get_at_risk_learners(int $days = 7, int $limit = 10): array {
         global $DB;
 
-        $dbman = $DB->get_manager();
-        if (!$dbman->table_exists(new \xmldb_table('local_learnpath_progress_cache'))) {
+        if (!self::tbl_exists('local_learnpath_progress_cache')) {
             return [];
         }
 
