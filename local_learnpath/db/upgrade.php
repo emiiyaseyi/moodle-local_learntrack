@@ -804,5 +804,70 @@ function xmldb_local_learnpath_upgrade(int $oldversion): bool {
         upgrade_plugin_savepoint(true, 2026050128, 'local', 'learnpath');
     }
 
+    if ($oldversion < 2026050129) {
+        // v1.0.0 (2026050129): Fix summary/per-course completion count mismatch.
+        // Root cause: get_progress_summary() was reading from stale progress cache.
+        // Cache stores completed_courses at last cron run — misses completions since
+        // then and also has wrong total_courses when courses are added/removed.
+        // Fix: get_progress_summary() now always calls _live_summary() which aggregates
+        // from get_progress_detail() (same 4-bulk-query source as comparison view).
+        // All four views — summary, per-course, comparison, individual — now read
+        // from the same authoritative live data.
+        // Also fixed: get_course_progress() completed_activities query now includes
+        // cm.completion > 0 AND cm.deletioninprogress = 0 filters to be consistent
+        // with the bulk query in get_progress_detail().
+        // Also fixed: export date filter now checks timecompleted for completed courses
+        // (previously only checked lastaccess, dropping completed courses accessed
+        // before the filter start date).
+        // No DB schema changes.
+        upgrade_plugin_savepoint(true, 2026050129, 'local', 'learnpath');
+    }
+
+    if ($oldversion < 2026050130) {
+        // v1.0.0 (2026050130): Fix bulk-query row collision in get_progress_detail().
+        // ROOT CAUSE: Moodle's get_records_sql() keys the result array by the first
+        // selected column. With first column = userid (Bulk 1, 4) or courseid (Bulk 3),
+        // rows for the SAME user in different courses overwrite each other. A learner
+        // with 17 completions in 17 courses was left with only 1 in the cc_map.
+        // FIX: Prefix every affected SELECT with a unique sql_concat(userid,'_',courseid)
+        // rowkey as the first column — identical technique used by the comparison view
+        // which already worked correctly. Bulk 2 was unaffected (GROUP BY course gives
+        // one row per course, already unique).
+        // No DB schema changes.
+        upgrade_plugin_savepoint(true, 2026050130, 'local', 'learnpath');
+    }
+
+    if ($oldversion < 2026050131) {
+        // v1.0.0 (2026050131): Fix automated reminder and scheduled-report delivery.
+        // BUGS FIXED (cron confirmed running — all bugs were in plugin code):
+        //
+        // 1. tasks.php timing: send_scheduled_reports moved from 06:00 UTC to 14:00 UTC
+        //    (15:00 WAT = 3 PM). send_reminders moved from 07:30 UTC to 09:00 UTC (10:00 WAT).
+        //
+        // 2. NULL nextrun ignored by send_scheduled_reports: condition was
+        //    "nextrun <= :now" — SQL NULL comparison is always false, so new
+        //    schedules with nextrun=NULL never fired. Fixed to "(nextrun IS NULL
+        //    OR nextrun <= :now)".
+        //
+        // 3. nextrun drift: +1 week from cron execution time causes the trigger day
+        //    to slowly drift because cron doesn't run at exactly the same second each
+        //    time. Fixed: nextrun is now pinned to 08:30 UTC (reminders) / 13:30 UTC
+        //    (reports), 30 min before the task's scheduled hour, so the cron always
+        //    catches it on the correct weekday regardless of second-level variance.
+        //
+        // 4. schedule.php initial nextrun: was "now + 1 week" (random creation time).
+        //    New weekly report schedules now target the next Friday at 13:30 UTC so
+        //    the first automated send is that Friday afternoon (WAT = 15:00 = 3 PM).
+        //
+        // 5. reminders.php: edit no longer resets nextrun (preserves schedule anchor).
+        //    New reminders use pinned nextrun instead of time().
+        //
+        // 6. nextrun advance moved outside try block in both tasks so a persistent
+        //    error (e.g., bad group ID) doesn't retry on every cron run forever.
+        //
+        // No DB schema changes.
+        upgrade_plugin_savepoint(true, 2026050131, 'local', 'learnpath');
+    }
+
     return true;
 }

@@ -96,11 +96,14 @@ if ($action === 'add' || ($action === 'edit' && $scheduleid)) {
         ];
         if (!empty($data->id)) {
             $rec->id = $data->id;
+            // Do not touch nextrun on edit — keeps existing schedule anchor.
             $DB->update_record('local_learnpath_schedules', $rec);
         } else {
             $rec->createdby   = $USER->id;
             $rec->timecreated = time();
-            $rec->nextrun     = send_scheduled_reports::calc_next_run($data->frequency, time());
+            // first_nextrun() targets next Friday 13:30 UTC for weekly schedules
+            // so the 14:00 UTC cron catches it that Friday (15:00 WAT = 3 PM).
+            $rec->nextrun = send_scheduled_reports::first_nextrun($data->frequency);
             $DB->insert_record('local_learnpath_schedules', $rec);
         }
         redirect(

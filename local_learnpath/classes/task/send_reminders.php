@@ -23,26 +23,40 @@ class send_reminders extends \core\task\scheduled_task {
         );
 
         if (empty($reminders)) {
-            \mtrace('LearnTrack: No reminders due.');
+            \mtrace('LearnTrack Reminders: None due at ' . \userdate($now));
             return;
         }
 
+        \mtrace('LearnTrack Reminders: ' . count($reminders) . ' reminder(s) due.');
+
         foreach ($reminders as $reminder) {
-            \mtrace("LearnTrack: Reminder [{$reminder->id}] '{$reminder->name}'");
+            \mtrace("LearnTrack Reminders: [{$reminder->id}] '{$reminder->name}'"
+                . " freq={$reminder->frequency} group={$reminder->groupid}");
+
             $group = $DB->get_record('local_learnpath_groups', ['id' => $reminder->groupid]);
             if (!$group) {
+                \mtrace("  ✗ Group {$reminder->groupid} not found — skipping.");
+                // Advance nextrun so a deleted-group reminder doesn't block forever.
+                $this->advance_nextrun($DB, $reminder, $now);
                 continue;
             }
 
             $allrows = data_helper::get_progress_detail((int)$reminder->groupid, \get_admin()->id);
 
-            // Group by user
+            // Group rows by user
             $by_user = [];
             foreach ($allrows as $row) {
                 $by_user[$row->userid][] = $row;
             }
 
+            if (empty($by_user)) {
+                \mtrace("  — No learners in group.");
+                $this->advance_nextrun($DB, $reminder, $now);
+                continue;
+            }
+
             $sent = 0;
+            $skipped = 0;
             foreach ($by_user as $uid => $courses) {
                 $completed = 0;
                 $total     = count($courses);
@@ -61,6 +75,7 @@ class send_reminders extends \core\task\scheduled_task {
                 };
 
                 if (!$match) {
+                    $skipped++;
                     continue;
                 }
 
@@ -70,6 +85,7 @@ class send_reminders extends \core\task\scheduled_task {
                         'userid'     => $uid,
                     ]);
                     if ($already) {
+                        $skipped++;
                         continue;
                     }
                 }
@@ -87,23 +103,56 @@ class send_reminders extends \core\task\scheduled_task {
                 }
             }
 
-            $next = self::calc_next_run($reminder->frequency, $now);
+            $this->advance_nextrun($DB, $reminder, $now);
+            \mtrace("  ✓ Sent={$sent} Skipped={$skipped}. Next: " . \userdate(
+                self::calc_next_run($reminder->frequency, $now)
+            ));
+        }
+    }
+
+    /**
+     * Update lastrun and nextrun for a reminder.
+     * nextrun is pinned to 08:30 UTC (30 min before the 09:00 UTC task cron)
+     * to prevent drift when cron execution time varies by seconds.
+     */
+    private function advance_nextrun(\moodle_database $DB, object $reminder, int $now): void {
+        $next = self::calc_next_run($reminder->frequency, $now);
+        try {
             $DB->update_record('local_learnpath_reminders', (object)[
                 'id'      => $reminder->id,
                 'lastrun' => $now,
                 'nextrun' => $next,
             ]);
-            \mtrace("  ✓ Sent to {$sent} learner(s). Next: " . \userdate($next));
+        } catch (\Throwable $e) {
+            \mtrace("  ✗ Could not update nextrun: " . $e->getMessage());
         }
     }
 
+    /**
+     * Next run pinned to 08:30 UTC on the correct future date.
+     * Pinning to a fixed time prevents weekly drift: the 09:00 UTC cron always
+     * catches an 08:30 UTC nextrun on the correct weekday.
+     *
+     * 'once' → +10 years (effectively disabled after first send).
+     */
     public static function calc_next_run(string $frequency, int $from): int {
-        return match($frequency) {
-            'daily'   => strtotime('+1 day',    $from),
-            'weekly'  => strtotime('+1 week',   $from),
-            'monthly' => strtotime('+1 month',  $from),
-            'once'    => strtotime('+10 years', $from),
-            default   => strtotime('+1 week',   $from),
-        };
+        if ($frequency === 'once') {
+            return strtotime('+10 years', $from);
+        }
+        $dt = new \DateTime('@' . $from, new \DateTimeZone('UTC'));
+        switch ($frequency) {
+            case 'daily':
+                $dt->modify('+1 day');
+                break;
+            case 'monthly':
+                $dt->modify('+1 month');
+                break;
+            default: // weekly
+                $dt->modify('+7 days');
+                break;
+        }
+        // Pin to 08:30 UTC so the 09:00 UTC task cron catches it without drift.
+        $dt->setTime(8, 30, 0);
+        return (int)$dt->getTimestamp();
     }
 }

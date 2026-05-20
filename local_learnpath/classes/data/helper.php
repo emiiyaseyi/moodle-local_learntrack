@@ -197,6 +197,7 @@ class helper {
                 "SELECT COUNT(cmc.id) FROM {course_modules_completion} cmc
                  JOIN {course_modules} cm ON cm.id = cmc.coursemoduleid
                  WHERE cm.course = :cid AND cmc.userid = :uid
+                   AND cm.completion > 0 AND cm.deletioninprogress = 0
                    AND cmc.completionstate IN (1, 2)",
                 ['cid' => $courseid, 'uid' => $userid]
             );
@@ -275,18 +276,26 @@ class helper {
         list($uins, $ups) = $DB->get_in_or_equal($learnerids, SQL_PARAMS_NAMED, 'u');
         $cup = array_merge($cps, $ups);
 
+        // ── Bulk queries — IMPORTANT: all SELECT lists begin with a UNIQUE rowkey ──
+        // Moodle's get_records_sql() keys the result array by the FIRST COLUMN.
+        // Without a unique first column, rows with the same first value overwrite
+        // each other: a learner with 17 completions in 17 courses keeps only 1.
+        // The unique rowkey (userid_courseid concat) prevents this.
+
         // Bulk 1: formal course completions
         $cc_map = [];
         foreach ($DB->get_records_sql(
-            "SELECT userid, course AS courseid, timecompleted
-             FROM {course_completions}
-             WHERE course $cins AND userid $uins AND timecompleted > 0",
+            "SELECT " . $DB->sql_concat('cc.userid', "'_'", 'cc.course') . " AS rowkey,
+                    cc.userid, cc.course AS courseid, cc.timecompleted
+             FROM {course_completions} cc
+             WHERE cc.course $cins AND cc.userid $uins AND cc.timecompleted > 0",
             $cup
         ) as $r) {
             $cc_map[(int)$r->userid][(int)$r->courseid] = (int)$r->timecompleted;
         }
 
         // Bulk 2: total completion-tracked activities per course
+        // First column is courseid — already unique per row (GROUP BY course). No rowkey needed.
         $total_map = [];
         foreach ($DB->get_records_sql(
             "SELECT course AS courseid, COUNT(id) AS cnt
@@ -301,7 +310,8 @@ class helper {
         // Bulk 3: completed activities per user per course
         $done_map = [];
         foreach ($DB->get_records_sql(
-            "SELECT cm.course AS courseid, cmc.userid, COUNT(cmc.id) AS cnt
+            "SELECT " . $DB->sql_concat('cmc.userid', "'_'", 'cm.course') . " AS rowkey,
+                    cm.course AS courseid, cmc.userid, COUNT(cmc.id) AS cnt
              FROM {course_modules_completion} cmc
              JOIN {course_modules} cm ON cm.id = cmc.coursemoduleid
              WHERE cm.course $cins AND cmc.userid $uins
@@ -318,7 +328,8 @@ class helper {
         try {
             $log_cutoff = time() - (365 * 86400);
             foreach ($DB->get_records_sql(
-                "SELECT userid, courseid,
+                "SELECT " . $DB->sql_concat('userid', "'_'", 'courseid') . " AS rowkey,
+                        userid, courseid,
                         MIN(timecreated) AS firstaccess, MAX(timecreated) AS lastaccess
                  FROM {logstore_standard_log}
                  WHERE courseid $cins AND userid $uins
@@ -387,54 +398,23 @@ class helper {
 
     /**
      * Summarise progress: one row per learner.
-     * Uses the progress cache when available (instant); falls back to bulk live calculation.
+     *
+     * Always uses the live bulk calculation via get_progress_detail() so that
+     * summary, per-course, and comparison views all derive from the same
+     * authoritative data source. The progress cache had two problems:
+     *   1. Stale completed_courses / total_courses when courses are added or
+     *      completions happen between cron runs.
+     *   2. inprogress/notstarted were computed as (total - completed) / 0,
+     *      which was wrong whenever some courses were genuinely not started.
+     *
+     * The cache is still updated by cron and still used by the block widget
+     * (get_user_path_progress). It is no longer used here.
      */
     public static function get_progress_summary(
         int    $groupid,
         int    $viewerid,
         string $user_status = 'active'
     ): array {
-        global $DB;
-
-        // Fast path: read from pre-computed progress cache
-        if (self::tbl_exists('local_learnpath_progress_cache')) {
-            $susp = '';
-            if ($user_status === 'active' || $user_status === 'inactive') {
-                $susp = ' AND u.suspended = 0';
-            } elseif ($user_status === 'suspended') {
-                $susp = ' AND u.suspended = 1';
-            }
-            $rows = $DB->get_records_sql(
-                "SELECT lpc.userid, lpc.completed_courses, lpc.total_courses,
-                        lpc.overall_progress, lpc.firstaccess, lpc.lastaccess,
-                        u.firstname, u.lastname, u.email, u.username
-                 FROM {local_learnpath_progress_cache} lpc
-                 JOIN {user} u ON u.id = lpc.userid
-                 WHERE lpc.groupid = :gid AND u.deleted = 0{$susp}
-                 ORDER BY u.lastname ASC, u.firstname ASC",
-                ['gid' => $groupid]
-            );
-            if (!empty($rows)) {
-                $inactive_days = (int)\get_config('local_learnpath', 'inactive_days');
-                $cutoff = $inactive_days > 0 ? time() - ($inactive_days * 86400) : 0;
-                $result = [];
-                foreach ($rows as $r) {
-                    if ($user_status === 'inactive' && $cutoff > 0) {
-                        if ($r->lastaccess && (int)$r->lastaccess >= $cutoff) continue;
-                    }
-                    $done = (int)$r->completed_courses;
-                    $tot  = (int)$r->total_courses;
-                    $r->inprogress_courses = max(0, $tot - $done);
-                    $r->notstarted_courses = 0;
-                    $r->status_sort = $r->overall_progress >= 100 ? 'complete'
-                        : ($r->overall_progress > 0 ? 'inprogress' : 'notstarted');
-                    $result[] = $r;
-                }
-                if (!empty($result)) return $result;
-            }
-        }
-
-        // Fallback: live bulk calculation
         return self::_live_summary($groupid, $viewerid, $user_status);
     }
 

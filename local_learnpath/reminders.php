@@ -90,15 +90,22 @@ if ($action === 'save' && confirm_sesskey()) {
         'message'       => optional_param('message',  '', PARAM_TEXT),
         'frequency'     => required_param('frequency', PARAM_ALPHA),
         'enabled'       => 1,
-        'nextrun'       => time(),
+        'nextrun'       => null, // set below after we have $eid
     ];
     $eid = optional_param('id', 0, PARAM_INT);
     if ($eid) {
         $rec->id = $eid;
+        // On edit, keep existing nextrun so the schedule anchor doesn't shift.
+        unset($rec->nextrun);
         $DB->update_record('local_learnpath_reminders', $rec);
     } else {
         $rec->createdby   = $USER->id;
         $rec->timecreated = time();
+        // Pin nextrun to 08:30 UTC on the next appropriate date so the 09:00 UTC
+        // cron catches it the very next occurrence without drift on weekly runs.
+        $rec->nextrun = \local_learnpath\task\send_reminders::calc_next_run(
+            $rec->frequency, time()
+        );
         $DB->insert_record('local_learnpath_reminders', $rec);
     }
     redirect(

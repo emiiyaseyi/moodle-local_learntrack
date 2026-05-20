@@ -167,10 +167,25 @@ class manager {
         // Always build all three datasets for complete exports
         $sum_data    = data_helper::get_progress_summary($groupid, $viewerid, $user_status);
         $detail_data = data_helper::get_progress_detail($groupid, $viewerid, $user_status);
+
+        // Date filter: keep a row when it falls within the range.
+        // A row matches if the course was completed within range (timecompleted),
+        // or accessed within range (lastaccess) for in-progress courses.
+        // Previously this only checked lastaccess, which silently dropped completed
+        // courses that were last accessed before the filter window.
         if ($from_ts) {
             $detail_data = array_filter($detail_data, function ($row) use ($from_ts, $to_ts) {
-                $ts = $row->lastaccess ?? 0;
-                return $ts && $ts >= $from_ts && ($to_ts === 0 || $ts <= $to_ts);
+                $tc = (int)($row->timecompleted ?? 0);
+                $la = (int)($row->lastaccess   ?? 0);
+                // Completed within range.
+                if ($tc > 0 && $tc >= $from_ts && ($to_ts === 0 || $tc <= $to_ts)) {
+                    return true;
+                }
+                // Accessed (in progress) within range.
+                if ($la > 0 && $la >= $from_ts && ($to_ts === 0 || $la <= $to_ts)) {
+                    return true;
+                }
+                return false;
             });
         }
 
