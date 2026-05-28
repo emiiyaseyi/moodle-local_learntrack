@@ -122,11 +122,45 @@ if ($action === 'add' && confirm_sesskey()) {
                 'timecreated' => $now,
             ]);
             $added++;
+            // ── Notify learner — in-app bell + direct email ──────────────────
+            $learner_n = $DB->get_record('user', ['id' => $uid, 'deleted' => 0]);
+            if ($learner_n) {
+                $path_url = (new moodle_url('/local/learnpath/mypath.php', ['groupid' => $groupid]))->out(false);
+                $subj = 'You have been added to a learning path: ' . format_string($group->name);
+                $plain = "Hi {$learner_n->firstname},\n\nYou have been added to the learning path \"" . format_string($group->name) . "\". Log in to LearnTrack to view your path and start learning.\n\n"
+                       . get_config('local_learnpath', 'email_sender_name') ?: 'LearnTrack';
+                $html  = '<p>Hi <strong>' . s($learner_n->firstname) . '</strong>,</p>'
+                       . '<p>You have been added to the learning path <strong>' . format_string($group->name) . '</strong>.</p>'
+                       . '<p>Log in and visit <strong>My Learning Paths</strong> to view your assigned courses and start learning.</p>'
+                       . '<hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">'
+                       . '<p style="font-size:.8em;color:#6b7280">This is an automated notification from LearnTrack. Do not reply to this email.</p>';
+                // Bell notification (blank email to prevent double-send)
+                $bell = new \core\message\message();
+                $bell->component       = 'local_learnpath';
+                $bell->name            = 'learntrack_reminder';
+                $bell->userfrom        = \core_user::get_noreply_user();
+                $bell_u = clone $learner_n; $bell_u->email = '';
+                $bell->userto          = $bell_u;
+                $bell->subject         = $subj;
+                $bell->fullmessage     = $plain;
+                $bell->fullmessageformat = FORMAT_PLAIN;
+                $bell->fullmessagehtml = $html;
+                $bell->smallmessage    = 'Added to path: ' . format_string($group->name);
+                $bell->notification    = 1;
+                $bell->contexturl      = $path_url;
+                $bell->contexturlname  = 'View My Learning Path';
+                try { message_send($bell); } catch (\Throwable $e) {}
+                // Direct email
+                $noreply = \core_user::get_noreply_user();
+                $noreply->firstname = get_config('local_learnpath', 'email_sender_name') ?: 'LearnTrack';
+                $noreply->lastname  = '';
+                try { email_to_user($learner_n, $noreply, $subj, $plain, $html); } catch (\Throwable $e) {}
+            }
         }
     }
     redirect(
         new moodle_url('/local/learnpath/learners.php', ['groupid' => $groupid]),
-        $added . ' learner(s) added to path.',
+        $added . ' learner(s) added to path' . ($added > 0 ? ' and notified by email and in-app message' : '') . '.',
         null, \core\output\notification::NOTIFY_SUCCESS
     );
 }
@@ -154,9 +188,41 @@ if ($action === 'add_cohorts' && confirm_sesskey()) {
                 'timecreated' => $now,
             ]);
             $added++;
+            // ── Notify learner ───────────────────────────────────────────────
+            $learner_n = $DB->get_record('user', ['id' => $uid, 'deleted' => 0]);
+            if ($learner_n) {
+                $path_url = (new moodle_url('/local/learnpath/mypath.php', ['groupid' => $groupid]))->out(false);
+                $subj = 'You have been added to a learning path: ' . format_string($group->name);
+                $plain = "Hi {$learner_n->firstname},\n\nYou have been added to the learning path \"" . format_string($group->name) . "\". Log in to LearnTrack to view your path and start learning.\n\n"
+                       . (get_config('local_learnpath', 'email_sender_name') ?: 'LearnTrack');
+                $html  = '<p>Hi <strong>' . s($learner_n->firstname) . '</strong>,</p>'
+                       . '<p>You have been added to the learning path <strong>' . format_string($group->name) . '</strong>.</p>'
+                       . '<p>Log in and visit <strong>My Learning Paths</strong> to view your assigned courses and start learning.</p>'
+                       . '<hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">'
+                       . '<p style="font-size:.8em;color:#6b7280">This is an automated notification from LearnTrack. Do not reply to this email.</p>';
+                $bell = new \core\message\message();
+                $bell->component       = 'local_learnpath';
+                $bell->name            = 'learntrack_reminder';
+                $bell->userfrom        = \core_user::get_noreply_user();
+                $bell_u = clone $learner_n; $bell_u->email = '';
+                $bell->userto          = $bell_u;
+                $bell->subject         = $subj;
+                $bell->fullmessage     = $plain;
+                $bell->fullmessageformat = FORMAT_PLAIN;
+                $bell->fullmessagehtml = $html;
+                $bell->smallmessage    = 'Added to path: ' . format_string($group->name);
+                $bell->notification    = 1;
+                $bell->contexturl      = $path_url;
+                $bell->contexturlname  = 'View My Learning Path';
+                try { message_send($bell); } catch (\Throwable $e) {}
+                $noreply = \core_user::get_noreply_user();
+                $noreply->firstname = get_config('local_learnpath', 'email_sender_name') ?: 'LearnTrack';
+                $noreply->lastname  = '';
+                try { email_to_user($learner_n, $noreply, $subj, $plain, $html); } catch (\Throwable $e) {}
+            }
         }
     }
-    $msg = $added . ' learner(s) added from cohort(s)';
+    $msg = $added . ' learner(s) added from cohort(s)' . ($added > 0 ? ' and notified' : '');
     if ($skipped > 0) $msg .= ' (' . $skipped . ' already assigned, skipped)';
     redirect(
         new moodle_url('/local/learnpath/learners.php', ['groupid' => $groupid]),

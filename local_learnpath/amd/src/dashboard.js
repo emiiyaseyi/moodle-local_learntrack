@@ -89,16 +89,20 @@ define([], function() {
     // ── Bulk checkbox helpers ─────────────────────────────────────────────────
 
     function ltCountSelected() {
-        var n  = document.querySelectorAll('.lt-row-check:checked').length;
+        // Count unique user IDs (Per Course view has one row per user+course)
+        var checked = new Set();
+        document.querySelectorAll('.lt-row-check:checked').forEach(function(cb) { checked.add(cb.value); });
+        var n  = checked.size;
         var el = document.getElementById('lt-bulk-count');
         if (el) {
             el.textContent = n > 0 ? n + ' selected' : '';
         }
-        var sa  = document.getElementById('lt-select-all');
+        var sa = document.getElementById('lt-select-all');
         if (sa) {
-            var all = document.querySelectorAll('.lt-row-check').length;
-            sa.indeterminate = n > 0 && n < all;
-            sa.checked = n === all && all > 0;
+            var allVals = new Set();
+            document.querySelectorAll('.lt-row-check').forEach(function(cb) { allVals.add(cb.value); });
+            sa.indeterminate = n > 0 && n < allVals.size;
+            sa.checked = allVals.size > 0 && n === allVals.size;
         }
     }
 
@@ -114,10 +118,10 @@ define([], function() {
     // ── Bulk action dispatcher ────────────────────────────────────────────────
 
     function ltBulkAction(action) {
-        var ids = [];
-        document.querySelectorAll('.lt-row-check:checked').forEach(function(cb) {
-            ids.push(cb.value);
-        });
+        // Deduplicate: Per Course view has multiple rows per user (one per course)
+        var idSet = new Set();
+        document.querySelectorAll('.lt-row-check:checked').forEach(function(cb) { idSet.add(cb.value); });
+        var ids = Array.from(idSet);
         if (ids.length === 0) {
             window.alert('Please select at least one learner.');
             return;

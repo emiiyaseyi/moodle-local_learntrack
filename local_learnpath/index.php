@@ -318,7 +318,7 @@ if (!$groupid) {
         if ($view === 'certs') {
             local_learnpath_render_certs($groupid, $gcourses, $isadmin);
         } elseif ($view === 'comparison') {
-            local_learnpath_render_comparison($groupid, $USER->id, $user_status, $gcourses);
+            local_learnpath_render_comparison($groupid, $USER->id, $user_status, $gcourses, $page, $perpage);
         } elseif ($view === 'detail') {
             $data = \local_learnpath\data\helper::get_progress_detail($groupid, $USER->id, $user_status);
             if ($course_filter > 0) {
@@ -327,7 +327,7 @@ if (!$groupid) {
             if (empty($data)) {
                 echo '<div style="padding:32px;text-align:center;color:#9ca3af;font-family:var(--lt-font)">No data for current filters.</div>';
             } else {
-                local_learnpath_render_detail($data, $sortcol, $sortdir, $groupid, $view, $course_filter);
+                local_learnpath_render_detail($data, $sortcol, $sortdir, $groupid, $view, $course_filter, $page, $perpage);
             }
         } else {
             // Summary view
@@ -369,7 +369,7 @@ echo $OUTPUT->footer();
 
 // ── RENDER FUNCTIONS ─────────────────────────────────────────────────────────
 
-function local_learnpath_render_comparison(int $groupid, int $viewerid, string $user_status, array $gcourses): void {
+function local_learnpath_render_comparison(int $groupid, int $viewerid, string $user_status, array $gcourses, int $page = 0, int $perpage = 25): void {
     global $DB;
     $learners = \local_learnpath\data\helper::get_learners_for_group($groupid, $viewerid, $user_status);
     if (empty($learners) || empty($gcourses)) {
@@ -425,29 +425,55 @@ function local_learnpath_render_comparison(int $groupid, int $viewerid, string $
             ['cid' => $c->id]
         ));
     }
+
+    // ── Pagination ────────────────────────────────────────────────────────────
+    $total       = count($learners);
+    $page        = max(0, min($page, max(0, (int)ceil($total / max(1, $perpage)) - 1)));
+    $learners_pg = array_slice(array_values($learners), $page * $perpage, $perpage);
+
+    // ── Bulk-action toolbar ───────────────────────────────────────────────────
+    $sched_url = new moodle_url('/local/learnpath/schedule.php', ['groupid' => $groupid]);
+    echo '<div style="padding:10px 14px;background:#f8fafc;border-bottom:1px solid #e5e7eb;display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-family:var(--lt-font);font-size:.78rem">';
+    echo '<label style="display:flex;align-items:center;gap:5px;color:#6b7280;cursor:pointer"><input type="checkbox" id="lt-select-all" onchange="ltToggleAll(this.checked)"> Select All</label>';
+    echo '<button onclick="ltBulkAction(\'remind\')" style="font-size:.74rem;font-weight:700;padding:4px 10px;border-radius:6px;border:1.5px solid #e5e7eb;background:#fff;cursor:pointer;color:#374151">📢 Send Reminder</button>';
+    echo html_writer::link($sched_url, '📅 Schedule Report', ['style' => 'font-size:.74rem;font-weight:700;padding:4px 10px;border-radius:6px;border:1.5px solid #e5e7eb;background:#fff;color:#374151;text-decoration:none']);
+    echo '<span id="lt-bulk-count" style="color:#9ca3af"></span>';
+    echo '<span style="margin-left:auto;color:#6b7280">Showing ' . ($total === 0 ? 0 : $page*$perpage+1) . '–' . min($total, ($page+1)*$perpage) . ' of ' . $total . ' learners</span>';
+    echo '<select onchange="window.location=\'?groupid=' . $groupid . '&view=comparison&page=0&perpage=\'+this.value" style="font-family:var(--lt-font);font-size:.76rem;border:1.5px solid #e5e7eb;border-radius:6px;padding:3px 7px;background:#fff">';
+    foreach ([25=>25,50=>50,100=>100,200=>200] as $pp=>$lbl) {
+        echo '<option value="'.$pp.'"'.($perpage===$pp?' selected':'').'>'.$lbl.' / page</option>';
+    }
+    echo '</select>';
+    echo '</div>';
+
+    // ── Table ─────────────────────────────────────────────────────────────────
     $cmp_tid = 'lt-cmp-' . $groupid;
     echo '<div style="overflow-x:auto"><table class="lt-data-table" id="' . $cmp_tid . '" style="font-size:.78rem">';
     echo '<thead><tr>';
+    echo '<th style="width:32px"></th>'; // checkbox col (index 0 for JS sort)
     $cmp_ths = ['Learner','Email'];
     foreach ($gcourses as $c_) { $cmp_ths[] = mb_strimwidth(format_string($c_->fullname), 0, 18, '…'); }
     $cmp_ths = array_merge($cmp_ths, ['Courses Done','Overall %','Status','First Access','Last Access']);
     foreach ($cmp_ths as $i => $th) {
-        echo '<th style="cursor:pointer;user-select:none" onclick="ltSortTable(\'' . $cmp_tid . '\',' . $i . ',this)">' . $th . ' <span class="lt-sort-arrow">⇅</span></th>';
+        // Offset by 1 because checkbox is col 0
+        echo '<th style="cursor:pointer;user-select:none" onclick="ltSortTable(\'' . $cmp_tid . '\',' . ($i+1) . ',this)">' . $th . ' <span class="lt-sort-arrow">⇅</span></th>';
     }
     echo '</tr></thead><tbody>';
-    foreach ($learners as $learner) {
+
+    foreach ($learners_pg as $learner) {
         $uid = $learner->id;
         $done_count = 0; $total_count = count($gcourses);
         echo '<tr>';
+        echo '<td><input type="checkbox" class="lt-row-check" value="' . $uid . '" onchange="ltCountSelected()"></td>';
         echo '<td>' . format_string($learner->firstname . ' ' . $learner->lastname) . '</td>';
         echo '<td>' . s($learner->email) . '</td>';
         foreach ($gcourses as $c) {
             $cid   = $c->id;
-            $total = $course_totals[$cid] ?? 0;
+            $ctot  = $course_totals[$cid] ?? 0;
             $done  = $mod_done[$uid][$cid] ?? 0;
-            $is_complete = !empty($cc_done[$uid][$cid]) || ($total > 0 && $done >= $total);
+            $is_complete = !empty($cc_done[$uid][$cid]) || ($ctot > 0 && $done >= $ctot);
             if ($is_complete) $done_count++;
-            $pct   = $is_complete ? 100 : ($total > 0 ? (int)round($done/$total*100) : 0);
+            $pct   = $is_complete ? 100 : ($ctot > 0 ? (int)round($done/$ctot*100) : 0);
             $color = $is_complete ? '#10b981' : ($pct > 0 ? '#f59e0b' : '#d1d5db');
             $not_enrolled = !in_array($uid, $cmp_enrolled[$cid] ?? []);
             if ($not_enrolled && $cmp_is_admin) {
@@ -491,26 +517,8 @@ function local_learnpath_render_comparison(int $groupid, int $viewerid, string $
     }
     echo '</tbody></table></div>';
 
-    // Pagination nav
-    $total_pages = (int)ceil($total / max(1, $perpage));
-    if ($total_pages > 1) {
-        $base_url = new moodle_url('/local/learnpath/index.php', ['groupid'=>$gid,'view'=>$view,'perpage'=>$perpage]);
-        echo '<div style="display:flex;align-items:center;justify-content:center;gap:6px;padding:14px;flex-wrap:wrap;font-family:var(--lt-font);font-size:.84rem">';
-        if ($page > 0) {
-            $base_url->param('page', $page - 1);
-            echo html_writer::link($base_url, '← Prev', ['style'=>'padding:5px 12px;border:1.5px solid #e5e7eb;border-radius:8px;text-decoration:none;color:#374151;background:#fff']);
-        }
-        for ($p = 0; $p < $total_pages; $p++) {
-            $base_url->param('page', $p);
-            $active = $p === $page ? 'background:var(--lt-accent);color:#fff;border-color:var(--lt-accent)' : 'background:#fff;color:#374151';
-            echo html_writer::link($base_url, (string)($p + 1), ['style'=>'padding:5px 11px;border:1.5px solid #e5e7eb;border-radius:8px;text-decoration:none;'.$active]);
-        }
-        if ($page < $total_pages - 1) {
-            $base_url->param('page', $page + 1);
-            echo html_writer::link($base_url, 'Next →', ['style'=>'padding:5px 12px;border:1.5px solid #e5e7eb;border-radius:8px;text-decoration:none;color:#374151;background:#fff']);
-        }
-        echo '</div>';
-    }
+    // ── Pagination nav ────────────────────────────────────────────────────────
+    local_learnpath_pagination($total, $page, $perpage, $groupid, 'comparison');
 }
 
 function local_learnpath_sort_th(string $col, string $label, string $cur, string $dir): string {
@@ -527,6 +535,40 @@ function local_learnpath_progress_bar(int $pct): string {
         . '<div style="width:80px;height:7px;background:#e5e7eb;border-radius:100px;overflow:hidden">'
         . '<div style="height:100%;width:' . $pct . '%;background:' . $color . ';border-radius:100px"></div></div>'
         . '<span style="font-size:.78rem;font-weight:800">' . $pct . '%</span></div>';
+}
+
+/**
+ * Render Prev / page-number links / Next pagination bar.
+ * Only renders when there is more than one page.
+ */
+function local_learnpath_pagination(int $total, int $page, int $perpage, int $gid, string $view): void {
+    $total_pages = (int)ceil($total / max(1, $perpage));
+    if ($total_pages <= 1) {
+        return;
+    }
+    $base = new moodle_url('/local/learnpath/index.php', ['groupid' => $gid, 'view' => $view, 'perpage' => $perpage]);
+    $btn  = 'padding:5px 13px;border:1.5px solid #e5e7eb;border-radius:8px;text-decoration:none;font-weight:600;background:#fff;color:#374151';
+    echo '<div style="display:flex;align-items:center;justify-content:center;gap:6px;padding:14px;flex-wrap:wrap;font-family:var(--lt-font);font-size:.84rem">';
+    if ($page > 0) {
+        $base->param('page', $page - 1);
+        echo html_writer::link($base, '← Prev', ['style' => $btn]);
+    }
+    // Show window of up to 5 page numbers centred on current page
+    $win_start = max(0, min($page - 2, $total_pages - 5));
+    $win_end   = min($total_pages - 1, $win_start + 4);
+    for ($p = $win_start; $p <= $win_end; $p++) {
+        $base->param('page', $p);
+        $style = $p === $page
+            ? 'padding:5px 11px;border:1.5px solid var(--lt-accent);border-radius:8px;text-decoration:none;background:var(--lt-accent);color:#fff;font-weight:700'
+            : 'padding:5px 11px;border:1.5px solid #e5e7eb;border-radius:8px;text-decoration:none;background:#fff;color:#374151';
+        echo html_writer::link($base, (string)($p + 1), ['style' => $style]);
+    }
+    if ($page < $total_pages - 1) {
+        $base->param('page', $page + 1);
+        echo html_writer::link($base, 'Next →', ['style' => $btn]);
+    }
+    echo '<span style="color:#9ca3af;font-size:.76rem;margin-left:4px">Page ' . ($page + 1) . ' of ' . $total_pages . '</span>';
+    echo '</div>';
 }
 
 function local_learnpath_enroll_user_in_courses(int $userid, int $groupid): string {
@@ -707,6 +749,9 @@ function local_learnpath_render_summary(array $data, string $sc, string $sd, int
         echo '</tr>';
     }
     echo '</tbody></table></div>';
+
+    // ── Pagination nav ────────────────────────────────────────────────────────
+    local_learnpath_pagination($total, $page, $perpage, $gid, $view);
 }
 
 function local_learnpath_render_certs(int $gid, array $gcourses, bool $isadmin): void {
@@ -765,13 +810,10 @@ function local_learnpath_render_certs(int $gid, array $gcourses, bool $isadmin):
     echo '</tbody></table></div>';
 }
 
-function local_learnpath_render_detail(array $data, string $sc, string $sd, int $gid, string $view, int $cf): void {
+function local_learnpath_render_detail(array $data, string $sc, string $sd, int $gid, string $view, int $cf, int $page = 0, int $perpage = 25): void {
     global $DB;
-    echo '<div style="overflow-x:auto"><table class="lt-data-table"><thead><tr>';
-    echo local_learnpath_sort_th('lastname',  'Learner',  $sc, $sd);
-    echo local_learnpath_sort_th('coursename','Course',   $sc, $sd);
-    echo local_learnpath_sort_th('progress',  'Progress', $sc, $sd);
-    echo '<th>Status</th><th>Activities</th><th>Enrolment</th></tr></thead><tbody>';
+
+    // Sort first
     if ($sc) {
         usort($data, function($a,$b) use ($sc,$sd) {
             $av = $a->$sc ?? ''; $bv = $b->$sc ?? '';
@@ -779,10 +821,16 @@ function local_learnpath_render_detail(array $data, string $sc, string $sd, int 
             return $sd === 'desc' ? -$r : $r;
         });
     }
-    // Pre-load enrolled users per course for NE check
-    $course_ids = array_unique(array_column($data, 'courseid'));
+
+    // Pagination
+    $total   = count($data);
+    $page    = max(0, min($page, max(0, (int)ceil($total / max(1, $perpage)) - 1)));
+    $data_pg = array_slice($data, $page * $perpage, $perpage);
+
+    // Pre-load enrolled users for current page only
+    $course_ids_pg = array_unique(array_column($data_pg, 'courseid'));
     $enrolled_per_course = [];
-    foreach ($course_ids as $cid) {
+    foreach ($course_ids_pg as $cid) {
         if (!$cid) continue;
         $enrolled_per_course[$cid] = $DB->get_fieldset_sql(
             'SELECT DISTINCT ue.userid FROM {user_enrolments} ue
@@ -792,11 +840,35 @@ function local_learnpath_render_detail(array $data, string $sc, string $sd, int 
     }
     $is_admin = has_capability('local/learnpath:manage', context_system::instance());
 
-    foreach ($data as $row) {
+    // ── Bulk-action toolbar ───────────────────────────────────────────────────
+    $sched_url = new moodle_url('/local/learnpath/schedule.php', ['groupid' => $gid]);
+    echo '<div style="padding:10px 14px;background:#f8fafc;border-bottom:1px solid #e5e7eb;display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-family:var(--lt-font);font-size:.78rem">';
+    echo '<label style="display:flex;align-items:center;gap:5px;color:#6b7280;cursor:pointer"><input type="checkbox" id="lt-select-all" onchange="ltToggleAll(this.checked)"> Select All</label>';
+    echo '<button onclick="ltBulkAction(\'remind\')" style="font-size:.74rem;font-weight:700;padding:4px 10px;border-radius:6px;border:1.5px solid #e5e7eb;background:#fff;cursor:pointer;color:#374151">📢 Send Reminder</button>';
+    echo html_writer::link($sched_url, '📅 Schedule Report', ['style' => 'font-size:.74rem;font-weight:700;padding:4px 10px;border-radius:6px;border:1.5px solid #e5e7eb;background:#fff;color:#374151;text-decoration:none']);
+    echo '<span id="lt-bulk-count" style="color:#9ca3af"></span>';
+    echo '<span style="margin-left:auto;color:#6b7280">Showing ' . ($total === 0 ? 0 : $page*$perpage+1) . '–' . min($total, ($page+1)*$perpage) . ' of ' . $total . ' entries</span>';
+    echo '<select onchange="window.location=\'?groupid=' . $gid . '&view=detail&page=0&perpage=\'+this.value" style="font-family:var(--lt-font);font-size:.76rem;border:1.5px solid #e5e7eb;border-radius:6px;padding:3px 7px;background:#fff">';
+    foreach ([25=>25,50=>50,100=>100,200=>200] as $pp=>$lbl) {
+        echo '<option value="'.$pp.'"'.($perpage===$pp?' selected':'').'>'.$lbl.' / page</option>';
+    }
+    echo '</select>';
+    echo '</div>';
+
+    // ── Table ─────────────────────────────────────────────────────────────────
+    echo '<div style="overflow-x:auto"><table class="lt-data-table"><thead><tr>';
+    echo '<th style="width:32px"></th>'; // checkbox col
+    echo local_learnpath_sort_th('lastname',  'Learner',  $sc, $sd);
+    echo local_learnpath_sort_th('coursename','Course',   $sc, $sd);
+    echo local_learnpath_sort_th('progress',  'Progress', $sc, $sd);
+    echo '<th>Status</th><th>Activities</th><th>Enrolment</th></tr></thead><tbody>';
+
+    foreach ($data_pg as $row) {
         $icon = match($row->status ?? 'notstarted') { 'complete'=>'✅','inprogress'=>'⏳',default=>'○' };
         $cid  = $row->courseid ?? 0;
         $is_enrolled = !$cid || in_array($row->userid, $enrolled_per_course[$cid] ?? []);
         echo '<tr>';
+        echo '<td><input type="checkbox" class="lt-row-check" value="' . (int)$row->userid . '" onchange="ltCountSelected()"></td>';
         echo '<td>' . format_string($row->firstname . ' ' . $row->lastname) . '</td>';
         echo '<td>' . format_string($row->coursename) . '</td>';
         echo '<td>' . local_learnpath_progress_bar((int)($row->progress ?? 0)) . '</td>';
@@ -823,4 +895,7 @@ function local_learnpath_render_detail(array $data, string $sc, string $sd, int 
         echo '</tr>';
     }
     echo '</tbody></table></div>';
+
+    // ── Pagination nav ────────────────────────────────────────────────────────
+    local_learnpath_pagination($total, $page, $perpage, $gid, 'detail');
 }

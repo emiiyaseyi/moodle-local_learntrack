@@ -58,12 +58,22 @@ class block_learntrack_mypath extends block_base {
                 $managed_set = $isMgr
                     ? array_flip($DB->get_fieldset_select('local_learnpath_managers', 'groupid', 'userid = :uid', ['uid' => $USER->id]))
                     : [];
+                // Mirror get_learners_for_group() logic:
+                //   Path has user_assign rows  → only those users see it
+                //   Path has NO user_assign rows → any enrolled learner sees it
+                $groups_with_assign = [];
+                if ($has_assign_tbl) {
+                    $gids_with_ua = $DB->get_fieldset_sql("SELECT DISTINCT groupid FROM {local_learnpath_user_assign}", []);
+                    $groups_with_assign = array_flip($gids_with_ua);
+                }
                 foreach ($groups as $grp) {
                     if ($isMgr && isset($managed_set[$grp->id])) { $myGrps[$grp->id] = $grp; continue; }
-                    if ($has_assign_tbl) {
+                    if ($has_assign_tbl && isset($groups_with_assign[$grp->id])) {
+                        // Explicit assignments exist for this path → only show to assigned users
                         if (isset($assigned_set[$grp->id])) { $myGrps[$grp->id] = $grp; }
                         continue;
                     }
+                    // No explicit assignments for this path → show if enrolled in any path course
                     foreach (\local_learnpath\data\helper::get_group_courses($grp->id) as $crs) {
                         $cx = context_course::instance($crs->id, IGNORE_MISSING);
                         if ($cx && is_enrolled($cx, $USER->id)) { $myGrps[$grp->id] = $grp; break; }

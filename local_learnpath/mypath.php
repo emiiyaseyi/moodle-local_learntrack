@@ -46,12 +46,33 @@ $isadmin_mp = has_capability('local/learnpath:manage', context_system::instance(
 if ($isadmin_mp) {
     $my_groups = $all_groups;
 } else {
-    $assigned_gids_mp = $DB->get_fieldset_select(
-        'local_learnpath_user_assign', 'groupid', 'userid = :uid', ['uid' => $USER->id]
-    );
-    $assigned_set_mp = array_flip($assigned_gids_mp);
+    // Mirror get_learners_for_group() logic exactly:
+    //   • Path has explicit user_assign rows → only those users see it
+    //   • Path has NO user_assign rows      → any enrolled learner sees it
     foreach ($all_groups as $g) {
-        if (isset($assigned_set_mp[$g->id])) { $my_groups[$g->id] = $g; }
+        $ua_count = $DB->count_records('local_learnpath_user_assign', ['groupid' => $g->id]);
+        if ($ua_count > 0) {
+            // Explicit assignments exist — only show if this user is in the list
+            if ($DB->record_exists('local_learnpath_user_assign', ['groupid' => $g->id, 'userid' => $USER->id])) {
+                $my_groups[$g->id] = $g;
+            }
+        } else {
+            // No explicit assignments — show if user is enrolled in any course in this path
+            $path_c_mp = DH::get_group_courses($g->id);
+            if (!empty($path_c_mp)) {
+                $cids_mp = array_keys($path_c_mp);
+                list($cins_mp, $cps_mp) = $DB->get_in_or_equal($cids_mp, SQL_PARAMS_NAMED, 'mp');
+                $is_enrolled_mp = $DB->record_exists_sql(
+                    "SELECT 1 FROM {user_enrolments} ue
+                     JOIN {enrol} e ON e.id = ue.enrolid AND e.courseid {$cins_mp}
+                     WHERE ue.userid = :mpuid",
+                    array_merge(['mpuid' => $USER->id], $cps_mp)
+                );
+                if ($is_enrolled_mp) {
+                    $my_groups[$g->id] = $g;
+                }
+            }
+        }
     }
 }
 
@@ -128,8 +149,19 @@ if (empty($my_groups)) {
 
         $completed = count(array_filter($myrows, function ($r) { return $r->status === 'complete'; }));
         $total     = count($myrows);
-        $pct       = $total > 0 ? (int)round($completed / $total * 100) : 0;
-        if ($completed >= $total && $total > 0) { $pct = 100; }
+        if ($total === 0) {
+            $pct = 0;
+        } elseif ($completed >= $total) {
+            $pct = 100;
+        } elseif ($completed > 0) {
+            // Some courses formally done: count-based %
+            $pct = (int)round($completed / $total * 100);
+        } else {
+            // No courses formally complete yet — use average activity-level progress.
+            // Fixes single-course paths showing 0% even after learner has started.
+            $avg_act = array_sum(array_map(fn($r) => (int)$r->progress, $myrows)) / $total;
+            $pct = min((int)round($avg_act), 99);
+        }
         $is_overdue = $group->deadline && $group->deadline < time() && $pct < 100;
 
         echo '<div class="lt-path-card">';

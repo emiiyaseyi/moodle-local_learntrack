@@ -869,5 +869,30 @@ function xmldb_local_learnpath_upgrade(int $oldversion): bool {
         upgrade_plugin_savepoint(true, 2026050131, 'local', 'learnpath');
     }
 
+    if ($oldversion < 2026050132) {
+        // v1.0.0 (2026050132): Fix automated task scheduling + history display.
+        //
+        // ROOT CAUSE of tasks never running: Moodle evaluates task cron expressions
+        // in the SITE configured timezone (Site admin → Location), not UTC. Setting
+        // hour=9 fires at 09:00 SITE-TIME which can be wildly different from WAT.
+        // Fix: tasks now run every 30 min (reminders) / every hour (reports). The
+        // internal nextrun timestamps in each table control actual delivery time,
+        // making the schedule timezone-independent.
+        //
+        // SEND HISTORY: Previously showed one row per learner per channel (64+ rows
+        // for a 32-learner path). Now the cron task inserts ONE batch-summary row
+        // (userid=0) per reminder dispatch. History tab shows only those summary rows,
+        // with a "X learners" count computed from the per-user rows in the same window.
+        //
+        // AUTO MANAGER WEEKLY REPORTS: send_scheduled_reports now automatically sends
+        // each path's summary report to all its managers every Friday between 14:00
+        // and 15:00 UTC (15:00-16:00 WAT = 3-4 PM Lagos). No manual schedule setup
+        // required per path. De-duplicates within the week via email_log viewmode flag
+        // 'auto_manager_weekly'.
+        //
+        // No DB schema changes.
+        upgrade_plugin_savepoint(true, 2026050132, 'local', 'learnpath');
+    }
+
     return true;
 }

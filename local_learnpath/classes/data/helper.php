@@ -441,6 +441,7 @@ class helper {
                     'inprogress_courses' => 0,
                     'notstarted_courses' => 0,
                     'overall_progress'   => 0,
+                    'sum_course_progress'=> 0,   // accumulates per-course activity %
                     'firstaccess'        => null,
                     'lastaccess'         => null,
                 ];
@@ -449,6 +450,7 @@ class helper {
             if ($row->status === 'complete')   { $s->completed_courses++; }
             if ($row->status === 'inprogress') { $s->inprogress_courses++; }
             if ($row->status === 'notstarted') { $s->notstarted_courses++; }
+            $s->sum_course_progress += (int)($row->progress ?? 0);
             if ($row->firstaccess && (!$s->firstaccess || $row->firstaccess < $s->firstaccess)) {
                 $s->firstaccess = $row->firstaccess;
             }
@@ -458,9 +460,19 @@ class helper {
         }
         foreach ($summary as $s) {
             if ($s->completed_courses >= $s->total_courses && $s->total_courses > 0) {
+                // All courses formally complete
                 $s->overall_progress = 100;
-            } elseif ($s->total_courses > 0) {
+            } elseif ($s->completed_courses > 0) {
+                // Mix: some formally complete, some not — count-based %
                 $s->overall_progress = (int)round(($s->completed_courses / $s->total_courses) * 100);
+            } elseif ($s->total_courses > 0) {
+                // No courses formally complete yet — use average activity-level progress.
+                // This fixes single-course paths (and early multi-course) showing 0%
+                // when learners have done activity work but not triggered formal completion.
+                $s->overall_progress = min(
+                    (int)round($s->sum_course_progress / $s->total_courses),
+                    99  // cap at 99% — 100% requires formal course completion
+                );
             }
         }
         return array_values($summary);
@@ -529,14 +541,29 @@ class helper {
                 $done_map[(int)$r->courseid] = (int)$r->cnt;
             }
 
-            $done = 0; $tot = count($courses);
+            $done = 0; $tot = count($courses); $sum_act = 0;
             foreach ($courses as $c) {
                 $cid = (int)$c->id;
                 $ta  = $total_map[$cid] ?? 0;
                 $da  = $done_map[$cid]  ?? 0;
-                if (isset($cc_set[$cid]) || ($ta > 0 && $da >= $ta)) $done++;
+                $is_complete = isset($cc_set[$cid]) || ($ta > 0 && $da >= $ta);
+                if ($is_complete) {
+                    $done++;
+                    $sum_act += 100;
+                } elseif ($ta > 0) {
+                    $sum_act += (int)round($da / $ta * 100);
+                }
             }
-            $pct = $tot > 0 ? (int)round($done / $tot * 100) : 0;
+            // Activity-aware progress — same logic as mypath.php and refresh_cache()
+            if ($tot === 0) {
+                $pct = 0;
+            } elseif ($done >= $tot) {
+                $pct = 100;
+            } elseif ($done > 0) {
+                $pct = (int)round($done / $tot * 100);
+            } else {
+                $pct = min((int)round($sum_act / $tot), 99);
+            }
             $result[$gid] = (object)[
                 'completed_courses' => $done,
                 'total_courses'     => $tot,
@@ -561,7 +588,8 @@ class helper {
         $now      = time();
 
         foreach ($learners as $learner) {
-            $completed  = 0;
+            $completed   = 0;
+            $sum_pct     = 0;
             $firstaccess = null;
             $lastaccess  = null;
 
@@ -570,6 +598,7 @@ class helper {
                 if ($p->status === 'complete') {
                     $completed++;
                 }
+                $sum_pct += (int)($p->progress ?? 0);
                 if ($p->firstaccess && (!$firstaccess || $p->firstaccess < $firstaccess)) {
                     $firstaccess = $p->firstaccess;
                 }
@@ -578,7 +607,18 @@ class helper {
                 }
             }
 
-            $pct = ($total > 0) ? (int)round($completed / $total * 100) : 0;
+            // Activity-aware progress: when no courses are formally complete,
+            // use average activity-level progress (capped at 99%) so the block
+            // shows meaningful progress for single-course paths / early learners.
+            if ($total === 0) {
+                $pct = 0;
+            } elseif ($completed >= $total) {
+                $pct = 100;
+            } elseif ($completed > 0) {
+                $pct = (int)round($completed / $total * 100);
+            } else {
+                $pct = min((int)round($sum_pct / $total), 99);
+            }
 
             $existing = $DB->get_record('local_learnpath_progress_cache', [
                 'groupid' => $groupid,

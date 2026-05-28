@@ -421,43 +421,71 @@ if ($action === 'trigger' && $reminderid) {
     if (!$dbman_h->table_exists(new xmldb_table('local_learnpath_reminder_log'))) {
         echo '<p style="font-family:var(--lt-font);color:#9ca3af;padding:24px">History table not available. Run upgrade (Site Admin → Notifications).</p>';
     } else {
-        $hist_where = $groupid > 0
-            ? "WHERE r.groupid = :gid"
-            : "";
+        $hist_where  = $groupid > 0 ? "AND r.groupid = :gid" : "";
         $hist_params = $groupid > 0 ? ['gid' => $groupid] : [];
+        // Query batch-summary rows only (userid=0).  These are the single rows inserted
+        // per send dispatch — one row per rule invocation, not one row per learner.
+        // Legacy rows (userid≠0 per-learner) are still stored for 'once' frequency
+        // de-duplication but are excluded from the UI display.
         $hist_logs = $DB->get_records_sql(
-            "SELECT rl.*, r.name AS rulename, r.groupid AS rgroupid
+            "SELECT rl.id, rl.reminderid, rl.channel, rl.timesent, rl.status,
+                    r.name AS rulename, r.groupid AS rgroupid,
+                    (SELECT COUNT(DISTINCT rl2.userid)
+                     FROM {local_learnpath_reminder_log} rl2
+                     WHERE rl2.reminderid = rl.reminderid
+                       AND rl2.userid <> 0
+                       AND rl2.timesent BETWEEN rl.timesent - 120 AND rl.timesent + 120
+                    ) AS learner_count
              FROM {local_learnpath_reminder_log} rl
-             LEFT JOIN {local_learnpath_reminders} r ON r.id=rl.reminderid
-             $hist_where
+             LEFT JOIN {local_learnpath_reminders} r ON r.id = rl.reminderid
+             WHERE rl.userid = 0 $hist_where
              ORDER BY rl.timesent DESC
-             LIMIT 200",
+             LIMIT 100",
             $hist_params
         );
 
         echo '<div class="lt-card">';
-        echo '<div class="lt-card-header"><h3 class="lt-card-title">📜 Full Send History</h3>';
-        echo '<span style="font-size:.76rem;color:#9ca3af;font-family:var(--lt-font)">Last 200 sends</span></div>';
+        echo '<div class="lt-card-header"><h3 class="lt-card-title">📜 Send History</h3>';
+        echo '<span style="font-size:.76rem;color:#9ca3af;font-family:var(--lt-font)">'
+            . 'One row per dispatch batch &mdash; Last 100</span></div>';
         echo '<div class="lt-card-body" style="padding:0">';
 
         if (empty($hist_logs)) {
             echo '<p style="font-family:var(--lt-font);color:#9ca3af;padding:24px 18px">No send history yet.</p>';
         } else {
             echo '<div style="overflow-x:auto"><table class="lt-data-table"><thead><tr>';
-            foreach (['Date & Time','Rule','Channel','Status',''] as $h) { echo '<th>' . $h . '</th>'; }
+            foreach (['Date & Time', 'Rule', 'Channels', 'Learners', 'Status', ''] as $h) {
+                echo '<th>' . $h . '</th>';
+            }
             echo '</tr></thead><tbody>';
             foreach ($hist_logs as $log) {
-                $ch_icon = str_contains($log->channel??'', 'email') ? '✉️' : (str_contains($log->channel??'', 'inapp') ? '🔔' : '📢');
-                $st_ok   = $log->status === 'sent';
+                $ch     = $log->channel ?? '';
+                $icons  = '';
+                if (str_contains($ch, 'email')) $icons .= '✉️ ';
+                if (str_contains($ch, 'inapp')) $icons .= '🔔 ';
+                if (str_contains($ch, 'sms'))   $icons .= '📱 ';
+                if (!$icons) $icons = '📢 ';
+                $st_ok  = $log->status === 'sent';
+                $lcount = (int)($log->learner_count ?? 0);
+
                 echo '<tr>';
-                echo '<td style="white-space:nowrap;font-size:.8rem">' . userdate($log->timesent, get_string('strftimedatetimeshort')) . '</td>';
+                echo '<td style="white-space:nowrap;font-size:.8rem">'
+                    . userdate($log->timesent, get_string('strftimedatetimeshort')) . '</td>';
                 echo '<td style="font-size:.82rem;font-weight:700">' . s($log->rulename ?? 'Deleted rule') . '</td>';
-                echo '<td>' . $ch_icon . ' <span style="font-size:.76rem;color:#6b7280">' . s($log->channel ?? '—') . '</span></td>';
-                echo '<td><span style="background:' . ($st_ok?'#d1fae5':'#fee2e2') . ';color:' . ($st_ok?'#065f46':'#be123c') . ';font-weight:700;padding:2px 9px;border-radius:100px;font-size:.72rem">' . ucfirst($log->status ?? '?') . '</span></td>';
-                // Link to the rule if it still exists
+                echo '<td>' . trim($icons)
+                    . ' <span style="font-size:.76rem;color:#6b7280">' . s($ch) . '</span></td>';
+                echo '<td style="font-size:.82rem;font-weight:700;color:#374151">'
+                    . ($lcount > 0 ? $lcount . ' learner' . ($lcount !== 1 ? 's' : '') : '—') . '</td>';
+                echo '<td><span style="background:' . ($st_ok ? '#d1fae5' : '#fee2e2')
+                    . ';color:' . ($st_ok ? '#065f46' : '#be123c')
+                    . ';font-weight:700;padding:2px 9px;border-radius:100px;font-size:.72rem">'
+                    . ucfirst($log->status ?? '?') . '</span></td>';
                 if ($log->reminderid && $log->rulename) {
-                    $rule_url = new moodle_url('/local/learnpath/reminders.php', ['groupid'=>$log->rgroupid??0,'action'=>'edit','reminderid'=>$log->reminderid]);
-                    echo '<td>' . html_writer::link($rule_url, '✏️', ['style'=>'text-decoration:none','title'=>'Edit rule']) . '</td>';
+                    $rule_url = new moodle_url('/local/learnpath/reminders.php',
+                        ['groupid' => $log->rgroupid ?? 0, 'action' => 'edit',
+                         'reminderid' => $log->reminderid]);
+                    echo '<td>' . html_writer::link($rule_url, '✏️',
+                        ['style' => 'text-decoration:none', 'title' => 'Edit rule']) . '</td>';
                 } else {
                     echo '<td></td>';
                 }
