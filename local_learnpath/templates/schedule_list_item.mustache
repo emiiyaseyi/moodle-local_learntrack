@@ -17,6 +17,7 @@
     - edit_url       string  URL to edit the schedule
     - delete_url     string  URL to delete (includes sesskey)
     - toggle_label   string  "Pause" or "Resume"
+    - is_managed     bool    Auto-provisioned weekly manager report — delete hidden
 
     @copyright 2025 Michael Adeniran
     @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
@@ -33,6 +34,9 @@
             {{^is_active}}
             <span class="lt-badge lt-badge--muted">Paused</span>
             {{/is_active}}
+            {{#is_managed}}
+            <span class="lt-badge lt-badge--muted" title="Auto-provisioned — resolves to current path managers on every send">&#x1F916; Auto &middot; Managers</span>
+            {{/is_managed}}
         </p>
         <p class="lt-schedule-item__meta">
             &#x1F4E7; {{recipients}}
@@ -43,9 +47,11 @@
     </div>
     <div class="lt-schedule-item__actions">
         <a href="{{toggle_url}}" class="lt-action-btn lt-btn-view">{{toggle_label}}</a>
+        {{^is_managed}}
         <a href="{{edit_url}}" class="lt-action-btn lt-btn-edit">&#x270F;&#xFE0F; {{#str}}edit_schedule, local_learnpath{{/str}}</a>
         <a href="{{delete_url}}"
            class="lt-action-btn lt-btn-del"
            data-confirm="{{#str}}confirm_delete_group, local_learnpath{{/str}}">&#x1F5D1;</a>
+        {{/is_managed}}
     </div>
 </div>

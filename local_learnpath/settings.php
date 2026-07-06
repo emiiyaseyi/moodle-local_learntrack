@@ -160,6 +160,32 @@ if ($hassiteconfig) {
         PARAM_INT
     ));
 
+    // ── Reminders ────────────────────────────────────────────────────────────
+    $settings->add(new admin_setting_heading(
+        'local_learnpath/reminders_hdr', 'Reminders', ''
+    ));
+
+    $settings->add(new admin_setting_configselect(
+        'local_learnpath/reminder_default_frequency',
+        'Default frequency for new reminder rules',
+        'Prefilled when an admin creates a new reminder rule. Can be changed per-rule.',
+        'interval',
+        [
+            'daily'    => 'Daily',
+            'interval' => 'Every N days (custom)',
+            'weekly'   => 'Weekly',
+            'monthly'  => 'Monthly',
+        ]
+    ));
+
+    $settings->add(new admin_setting_configtext(
+        'local_learnpath/reminder_default_interval_days',
+        'Default interval (days)',
+        'Used when the default frequency above is "Every N days". Default: 3.',
+        '3',
+        PARAM_INT
+    ));
+
     // ── Export & Email ────────────────────────────────────────────────────────
     $settings->add(new admin_setting_heading(
         'local_learnpath/export_hdr', 'Export & Email', ''

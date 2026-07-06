@@ -89,6 +89,7 @@ if ($action === 'save' && confirm_sesskey()) {
         'subject'       => optional_param('subject',  '', PARAM_TEXT),
         'message'       => optional_param('message',  '', PARAM_TEXT),
         'frequency'     => required_param('frequency', PARAM_ALPHA),
+        'intervaldays'  => optional_param('intervaldays', 0, PARAM_INT) ?: null,
         'enabled'       => 1,
         'nextrun'       => null, // set below after we have $eid
     ];
@@ -101,10 +102,11 @@ if ($action === 'save' && confirm_sesskey()) {
     } else {
         $rec->createdby   = $USER->id;
         $rec->timecreated = time();
-        // Pin nextrun to 08:30 UTC on the next appropriate date so the 09:00 UTC
-        // cron catches it the very next occurrence without drift on weekly runs.
-        $rec->nextrun = \local_learnpath\task\send_reminders::calc_next_run(
-            $rec->frequency, time()
+        // Recurring rules become eligible on the very next cron tick instead of
+        // waiting a full period for their first send. 'once' rules stay parked
+        // (manual "Send Now" only — never auto-picked up by cron).
+        $rec->nextrun = \local_learnpath\task\send_reminders::first_nextrun(
+            $rec->frequency, $rec->intervaldays
         );
         $DB->insert_record('local_learnpath_reminders', $rec);
     }
@@ -348,10 +350,13 @@ if ($action === 'trigger' && $reminderid) {
     if ($action === 'edit' && $reminderid) {
         $editing = $DB->get_record('local_learnpath_reminders', ['id' => $reminderid]);
     }
+    $default_freq = get_config('local_learnpath', 'reminder_default_frequency') ?: 'interval';
+    $default_days = (int)(get_config('local_learnpath', 'reminder_default_interval_days') ?: 3);
     $e = $editing ?? (object)[
         'id' => 0, 'groupid' => $groupid, 'name' => '', 'target' => 'incomplete',
         'channel_email' => 1, 'channel_inapp' => 1, 'channel_sms' => 0,
-        'subject' => '', 'message' => '', 'frequency' => 'once',
+        'subject' => '', 'message' => '', 'frequency' => $default_freq,
+        'intervaldays' => $default_days,
     ];
 
     $all_groups_r = $DB->get_records('local_learnpath_groups', null, 'name ASC');
@@ -386,12 +391,23 @@ if ($action === 'trigger' && $reminderid) {
     }
     echo '</select></div></div>';
 
-    echo '<div style="margin-bottom:14px"><label style="font-family:var(--lt-font);font-size:.74rem;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:5px">Frequency</label>';
-    echo '<select name="frequency" style="' . $inp . '" style="max-width:220px">';
-    foreach (['once'=>'Once only','daily'=>'Daily','weekly'=>'Weekly','monthly'=>'Monthly'] as $v=>$l) {
+    echo '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">';
+    echo '<div><label style="font-family:var(--lt-font);font-size:.74rem;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:5px">Frequency</label>';
+    echo '<select name="frequency" id="lt-rem-freq" style="' . $inp . '" onchange="document.getElementById(\'lt-rem-interval\').style.display=(this.value===\'interval\')?\'block\':\'none\'">';
+    foreach ([
+        'once'     => 'Once — manual send only (not automatic)',
+        'daily'    => 'Daily',
+        'interval' => 'Every N days (custom)',
+        'weekly'   => 'Weekly',
+        'monthly'  => 'Monthly',
+    ] as $v=>$l) {
         echo '<option value="' . $v . '"' . ($e->frequency===$v?' selected':'') . '>' . $l . '</option>';
     }
     echo '</select></div>';
+    echo '<div id="lt-rem-interval" style="display:' . ($e->frequency==='interval'?'block':'none') . '">';
+    echo '<label style="font-family:var(--lt-font);font-size:.74rem;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:5px">Every how many days?</label>';
+    echo '<input type="number" name="intervaldays" min="1" max="90" value="' . (int)($e->intervaldays ?: 3) . '" style="' . $inp . '"></div>';
+    echo '</div>';
 
     echo '<div style="margin-bottom:14px"><label style="font-family:var(--lt-font);font-size:.74rem;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:8px">Default Channels</label>';
     echo '<div style="display:flex;gap:8px;flex-wrap:wrap">';
@@ -507,7 +523,7 @@ if ($action === 'trigger' && $reminderid) {
 
     $tarbg  = ['notstarted'=>'#f3f4f6','inprogress'=>'#fef3c7','incomplete'=>'#fee2e2'];
     $tarlbl = ['notstarted'=>'⭕ Not Started','inprogress'=>'⏳ In Progress','incomplete'=>'🔴 Incomplete'];
-    $freqlbl= ['once'=>'Once','daily'=>'Daily','weekly'=>'Weekly','monthly'=>'Monthly'];
+    $freqlbl= ['once'=>'Once (manual)','daily'=>'Daily','weekly'=>'Weekly','monthly'=>'Monthly'];
     $dbman_r = $DB->get_manager();
     $has_log_table = $dbman_r->table_exists(new xmldb_table('local_learnpath_reminder_log'));
 
@@ -555,7 +571,10 @@ if ($action === 'trigger' && $reminderid) {
             echo $r_group_name ? '<span style="font-size:.74rem;color:#6b7280;font-weight:400">' . $r_group_name . '</span>' : '';
             echo '</p>';
             echo '<p style="font-size:.74rem;color:#6b7280;margin:0">';
-            echo ($tarlbl[$r->target] ?? $r->target) . ' · ' . ($freqlbl[$r->frequency] ?? $r->frequency);
+            $freq_text = $r->frequency === 'interval'
+                ? 'Every ' . (int)($r->intervaldays ?: 3) . ' days'
+                : ($freqlbl[$r->frequency] ?? $r->frequency);
+            echo ($tarlbl[$r->target] ?? $r->target) . ' · ' . $freq_text;
             if ($r->channel_email) echo ' &nbsp;<span style="background:#dbeafe;color:#1e40af;padding:1px 6px;border-radius:100px;font-size:.68rem;font-weight:700">✉️ Email</span>';
             if ($r->channel_inapp) echo ' <span style="background:#d1fae5;color:#065f46;padding:1px 6px;border-radius:100px;font-size:.68rem;font-weight:700">🔔 In-App</span>';
             if ($r->channel_sms)   echo ' <span style="background:#ede9fe;color:#5b21b6;padding:1px 6px;border-radius:100px;font-size:.68rem;font-weight:700">📱 SMS</span>';

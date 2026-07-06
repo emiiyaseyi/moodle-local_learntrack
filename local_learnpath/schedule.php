@@ -55,6 +55,15 @@ $brand_cfg = [
 
 // ── Action handlers ───────────────────────────────────────────────────────────
 if ($action === 'delete' && $scheduleid && confirm_sesskey()) {
+    $target = $DB->get_record('local_learnpath_schedules', ['id' => $scheduleid, 'groupid' => $groupid]);
+    if ($target && !empty($target->ismanaged)) {
+        redirect(
+            new moodle_url('/local/learnpath/schedule.php', ['groupid' => $groupid]),
+            'The auto-generated weekly manager report can\'t be deleted — pause it instead.',
+            null,
+            \core\output\notification::NOTIFY_WARNING
+        );
+    }
     $DB->delete_records('local_learnpath_schedules', ['id' => $scheduleid, 'groupid' => $groupid]);
     redirect(
         new moodle_url('/local/learnpath/schedule.php', ['groupid' => $groupid]),
@@ -169,13 +178,17 @@ $freq_bg    = ['daily' => '#fee2e2', 'weekly' => '#dbeafe', 'monthly' => '#d1fae
 $schedule_items = [];
 foreach ($schedules_raw as $s) {
     $freq = $s->frequency ?? 'weekly';
+    $is_managed = !empty($s->ismanaged);
     $schedule_items[] = [
         'freq_icon'    => $freq_icons[$freq] ?? '📅',
         'freq_bg'      => $freq_bg[$freq] ?? '#f3f4f6',
         'freq_label'   => ucfirst($freq),
         'format_label' => strtoupper($s->format ?? 'xlsx'),
         'is_active'    => (bool)$s->enabled,
-        'recipients'   => s($s->recipients),
+        'is_managed'   => $is_managed,
+        'recipients'   => (($s->recipienttype ?? 'manual') === 'managers')
+            ? 'All current path managers'
+            : s($s->recipients),
         'next_run'     => userdate($s->nextrun, get_string('strftimedatefullshort')),
         'has_last_run' => !empty($s->lastrun),
         'last_run'     => !empty($s->lastrun) ? userdate($s->lastrun, get_string('strftimedatefullshort')) : '',

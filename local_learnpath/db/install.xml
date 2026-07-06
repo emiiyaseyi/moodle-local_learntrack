@@ -66,6 +66,8 @@
         <FIELD NAME="createdby"   TYPE="int"  LENGTH="10" NOTNULL="true"/>
         <FIELD NAME="timecreated" TYPE="int"  LENGTH="10" NOTNULL="true"/>
         <FIELD NAME="enabled"     TYPE="int"  LENGTH="1"  NOTNULL="true" DEFAULT="1"/>
+        <FIELD NAME="recipienttype" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="manual"/>
+        <FIELD NAME="ismanaged"     TYPE="int"  LENGTH="1"  NOTNULL="true" DEFAULT="0"/>
       </FIELDS>
       <KEYS>
         <KEY NAME="primary"  TYPE="primary" FIELDS="id"/>
@@ -86,6 +88,7 @@
         <FIELD NAME="subject"       TYPE="char" LENGTH="255" NOTNULL="false"/>
         <FIELD NAME="message"       TYPE="text"              NOTNULL="false"/>
         <FIELD NAME="frequency"     TYPE="char" LENGTH="20"  NOTNULL="true" DEFAULT="once"/>
+        <FIELD NAME="intervaldays"  TYPE="int"  LENGTH="10"  NOTNULL="false"/>
         <FIELD NAME="nextrun"       TYPE="int"  LENGTH="10"  NOTNULL="false"/>
         <FIELD NAME="lastrun"       TYPE="int"  LENGTH="10"  NOTNULL="false"/>
         <FIELD NAME="enabled"       TYPE="int"  LENGTH="1"   NOTNULL="true" DEFAULT="1"/>

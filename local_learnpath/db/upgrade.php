@@ -894,5 +894,103 @@ function xmldb_local_learnpath_upgrade(int $oldversion): bool {
         upgrade_plugin_savepoint(true, 2026050132, 'local', 'learnpath');
     }
 
+    if ($oldversion < 2026050134) {
+        // v1.0.0 (2026050134): Rework of reminder/report scheduling.
+        //
+        // ROOT CAUSE #1: Moodle only applies db/tasks.php's schedule on fresh
+        // install — upgrading the plugin's code never changes an already-
+        // installed task's cron cadence in {task_scheduled}. Sites that have
+        // been through several LearnTrack versions could still be running a
+        // stale pre-savepoint-132 cadence despite the code now saying "every
+        // 30 minutes". Fix: force a resync of this plugin's task schedules to
+        // the current db/tasks.php defaults on every upgrade through this step.
+        if (class_exists('\core\task\manager')
+                && method_exists('\core\task\manager', 'reset_scheduled_tasks_for_component')) {
+            try {
+                \core\task\manager::reset_scheduled_tasks_for_component('local_learnpath');
+            } catch (\Throwable $e) {
+                debugging('LearnTrack upgrade: task resync failed: ' . $e->getMessage(), DEBUG_DEVELOPER);
+            }
+        }
+
+        // ROOT CAUSE #2: "every 3 days" reminders were impossible — the
+        // frequency enum only had once/daily/weekly/monthly. Add intervaldays
+        // to support a custom "every N days" frequency ('interval').
+        $rtable = new xmldb_table('local_learnpath_reminders');
+        $rfield = new xmldb_field('intervaldays', XMLDB_TYPE_INTEGER, '10', null, false);
+        if (!$dbman->field_exists($rtable, $rfield)) {
+            $dbman->add_field($rtable, $rfield);
+        }
+
+        // ROOT CAUSE #3: the manager weekly report used a fragile one-hour
+        // Friday-only window with no catch-up if cron missed it. Retire that
+        // special case — a path's weekly manager report is now just a normal
+        // local_learnpath_schedules row (recipients resolved dynamically at
+        // send time), reusing the same robust nextrun<=now mechanism explicit
+        // schedules already use.
+        $stable = new xmldb_table('local_learnpath_schedules');
+        $sfield1 = new xmldb_field('recipienttype', XMLDB_TYPE_CHAR, '20', null, XMLDB_NOTNULL, null, 'manual');
+        if (!$dbman->field_exists($stable, $sfield1)) {
+            $dbman->add_field($stable, $sfield1);
+        }
+        $sfield2 = new xmldb_field('ismanaged', XMLDB_TYPE_INTEGER, '1', null, XMLDB_NOTNULL, null, '0');
+        if (!$dbman->field_exists($stable, $sfield2)) {
+            $dbman->add_field($stable, $sfield2);
+        }
+
+        // Data migration: give every existing path a managed weekly manager
+        // report if it doesn't already have one. Idempotent — safe to re-run.
+        $paths = $DB->get_records('local_learnpath_groups');
+        foreach ($paths as $path) {
+            $exists = $DB->record_exists('local_learnpath_schedules', [
+                'groupid' => $path->id, 'ismanaged' => 1,
+            ]);
+            if ($exists) {
+                continue;
+            }
+            $DB->insert_record('local_learnpath_schedules', (object)[
+                'groupid'       => $path->id,
+                'recipients'    => '',
+                'recipienttype' => 'managers',
+                'frequency'     => 'weekly',
+                'format'        => 'xlsx',
+                'viewmode'      => 'summary',
+                'nextrun'       => \local_learnpath\task\send_scheduled_reports::first_nextrun('weekly'),
+                'lastrun'       => null,
+                'createdby'     => get_admin()->id,
+                'timecreated'   => time(),
+                'enabled'       => 1,
+                'ismanaged'     => 1,
+            ]);
+        }
+
+        upgrade_plugin_savepoint(true, 2026050134, 'local', 'learnpath');
+    }
+
+    if ($oldversion < 2026050135) {
+        // v1.0.0 (2026050135): Stop manage.php from silently deleting individual
+        // learner assignments on every path edit.
+        //
+        // ROOT CAUSE: manage.php's save handler ran delete_records() on
+        // local_learnpath_user_assign then re-inserted only from the edit form's
+        // participant pickers — but classes/form/group_form.php caps that
+        // picker's option list to the first `participant_cap` users (default
+        // 500) ordered by lastname. A learner added via learners.php (or a
+        // cohort, or simply sorted past the cap) would be missing from the
+        // rendered options, so the browser could never resubmit them as
+        // selected — and the very next path edit (for any unrelated reason)
+        // deleted their assignment. The dashboard block and mypath.php were
+        // reporting reality correctly; the row underneath had been wiped.
+        //
+        // FIX: manage.php's participant/cohort save is now additive-only
+        // (insert-if-not-exists), matching learners.php's existing model.
+        // group_form.php now also merges currently-assigned users into the
+        // option list even if they're outside the cap, so the form displays
+        // them correctly. Bulk removal is now an explicit "Remove All" action
+        // on learners.php instead of an implicit side effect of any edit.
+        // No DB schema changes.
+        upgrade_plugin_savepoint(true, 2026050135, 'local', 'learnpath');
+    }
+
     return true;
 }

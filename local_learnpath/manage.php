@@ -69,6 +69,7 @@ if ($action === 'delete' && $groupid > 0 && confirm_sesskey()) {
     $DB->delete_records('local_learnpath_notes',           ['groupid' => $groupid]);
     $DB->delete_records('local_learnpath_managers',        ['groupid' => $groupid]);
     $DB->delete_records('local_learnpath_progress_cache',  ['groupid' => $groupid]);
+    $DB->delete_records('local_learnpath_user_assign',     ['groupid' => $groupid]);
     $DB->delete_records('local_learnpath_groups',          ['id'      => $groupid]);
     redirect(
         new moodle_url('/local/learnpath/manage.php'),
@@ -107,7 +108,7 @@ if ($action === 'add' || ($action === 'edit' && $groupid > 0)) {
     }
 
     // THE FIX: pass $PAGE->url (moodle_url object) — converts action+groupid to hidden fields
-    $form = new group_form($PAGE->url);
+    $form = new group_form($PAGE->url, ['groupid' => $groupid]);
     $form->set_data($formdata);
 
     if ($form->is_cancelled()) {
@@ -201,10 +202,16 @@ if ($action === 'add' || ($action === 'edit' && $groupid > 0)) {
             }
         }
 
-        // Save manually selected participants + cohort members to user_assign table
+        // Add manually selected participants + cohort members to the user_assign
+        // table. ADDITIVE ONLY — never delete-then-reinsert here. This form's
+        // participant pickers are capped to the first N users (participant_cap)
+        // for performance, so they can never be trusted to round-trip the FULL
+        // current assignment list; treating them as authoritative silently wiped
+        // out learners added elsewhere (learners.php, cohort adds, or anyone past
+        // the cap) on every unrelated path edit. Removal is a deliberate action —
+        // it only happens via learners.php's "Remove" / "Remove All".
         $dbman = $DB->get_manager();
         if ($dbman->table_exists(new xmldb_table('local_learnpath_user_assign'))) {
-            $DB->delete_records('local_learnpath_user_assign', ['groupid' => $savedid]);
             $pnow = time();
             $assigned_uids = [];
 
@@ -217,9 +224,11 @@ if ($action === 'add' || ($action === 'edit' && $groupid > 0)) {
                 $puid = (int)$puid;
                 if ($puid <= 0 || isset($assigned_uids[$puid])) continue;
                 if (!$DB->record_exists('user', ['id' => $puid, 'deleted' => 0])) continue;
-                $DB->insert_record('local_learnpath_user_assign', (object)[
-                    'groupid' => $savedid, 'userid' => $puid, 'assignedby' => $USER->id, 'timecreated' => $pnow,
-                ]);
+                if (!$DB->record_exists('local_learnpath_user_assign', ['groupid' => $savedid, 'userid' => $puid])) {
+                    $DB->insert_record('local_learnpath_user_assign', (object)[
+                        'groupid' => $savedid, 'userid' => $puid, 'assignedby' => $USER->id, 'timecreated' => $pnow,
+                    ]);
+                }
                 $assigned_uids[$puid] = true;
             }
 
@@ -236,9 +245,11 @@ if ($action === 'add' || ($action === 'edit' && $groupid > 0)) {
                     $puid = (int)$cm->userid;
                     if ($puid <= 0 || isset($assigned_uids[$puid])) continue;
                     if (!$DB->record_exists('user', ['id' => $puid, 'deleted' => 0])) continue;
-                    $DB->insert_record('local_learnpath_user_assign', (object)[
-                        'groupid' => $savedid, 'userid' => $puid, 'assignedby' => $USER->id, 'timecreated' => $pnow,
-                    ]);
+                    if (!$DB->record_exists('local_learnpath_user_assign', ['groupid' => $savedid, 'userid' => $puid])) {
+                        $DB->insert_record('local_learnpath_user_assign', (object)[
+                            'groupid' => $savedid, 'userid' => $puid, 'assignedby' => $USER->id, 'timecreated' => $pnow,
+                        ]);
+                    }
                     $assigned_uids[$puid] = true;
                 }
             }
@@ -263,6 +274,28 @@ if ($action === 'add' || ($action === 'edit' && $groupid > 0)) {
                     'scope'   => $mscope,
                 ]);
             }
+        }
+
+        // New paths get a managed weekly manager report from day one (mirrors
+        // the migration that back-fills this for pre-existing paths). Uses the
+        // same nextrun<=now mechanism as any other schedule, so it self-heals
+        // if cron is ever delayed — no fixed-hour window to miss.
+        if (empty($data->id)
+                && !$DB->record_exists('local_learnpath_schedules', ['groupid' => $savedid, 'ismanaged' => 1])) {
+            $DB->insert_record('local_learnpath_schedules', (object)[
+                'groupid'       => $savedid,
+                'recipients'    => '',
+                'recipienttype' => 'managers',
+                'frequency'     => 'weekly',
+                'format'        => 'xlsx',
+                'viewmode'      => 'summary',
+                'nextrun'       => \local_learnpath\task\send_scheduled_reports::first_nextrun('weekly'),
+                'lastrun'       => null,
+                'createdby'     => $USER->id,
+                'timecreated'   => $now,
+                'enabled'       => 1,
+                'ismanaged'     => 1,
+            ]);
         }
 
         redirect(

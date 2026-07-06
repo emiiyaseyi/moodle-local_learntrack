@@ -102,7 +102,7 @@ class group_form extends \moodleform {
             );
         }
 
-        // User autocomplete — limited by admin-configured cap (max 500)
+        // User autocomplete — candidate list capped for performance (participant_cap).
         $useropts = [];
         $total_users = $DB->count_records('user', ['deleted' => 0, 'confirmed' => 1, 'suspended' => 0]);
         $user_limit  = min(500, (int)(get_config('local_learnpath', 'participant_cap') ?: 500));
@@ -117,6 +117,32 @@ class group_form extends \moodleform {
         foreach ($allusers as $u) {
             $label = \fullname($u) . ' — ' . $u->email;
             $useropts[$u->id] = $label;
+        }
+
+        // The candidate list above is capped and can miss currently-assigned
+        // learners (added via learners.php, cohort adds, or simply sorted past
+        // the cap on a large site). A select/autocomplete element can only show
+        // — and resubmit — a value that exists as one of its options, so any
+        // assigned user missing here would silently vanish from this list AND
+        // (since the save handler is additive-only, not authoritative) just be
+        // invisible in this picker without actually being removed. Merge them
+        // in explicitly so the form is honest about who's currently assigned.
+        $groupid = (int)($this->_customdata['groupid'] ?? 0);
+        if ($groupid > 0 && $DB->get_manager()->table_exists(new \xmldb_table('local_learnpath_user_assign'))) {
+            $missing_ids = array_diff(
+                $DB->get_fieldset_select('local_learnpath_user_assign', 'userid', 'groupid = ?', [$groupid]),
+                array_keys($useropts)
+            );
+            if (!empty($missing_ids)) {
+                list($insql, $inparams) = $DB->get_in_or_equal($missing_ids, SQL_PARAMS_NAMED);
+                $extra_users = $DB->get_records_select(
+                    'user', "id $insql AND deleted = 0", $inparams,
+                    'lastname ASC, firstname ASC'
+                );
+                foreach ($extra_users as $u) {
+                    $useropts[$u->id] = \fullname($u) . ' — ' . $u->email;
+                }
+            }
         }
 
         $mform->addElement('autocomplete', 'participant_userids',

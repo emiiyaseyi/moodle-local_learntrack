@@ -36,7 +36,8 @@ class send_reminders extends \core\task\scheduled_task {
             $group = $DB->get_record('local_learnpath_groups', ['id' => $reminder->groupid]);
             if (!$group) {
                 \mtrace("  ✗ Group {$reminder->groupid} not found — skipping.");
-                $this->advance_nextrun($DB, $reminder, $now);
+                $next = self::calc_next_run($reminder->frequency, $now, $reminder->intervaldays ?? null);
+                $this->advance_nextrun($DB, $reminder, $now, $next);
                 continue;
             }
 
@@ -49,7 +50,8 @@ class send_reminders extends \core\task\scheduled_task {
 
             if (empty($by_user)) {
                 \mtrace("  — No learners in group.");
-                $this->advance_nextrun($DB, $reminder, $now);
+                $next = self::calc_next_run($reminder->frequency, $now, $reminder->intervaldays ?? null);
+                $this->advance_nextrun($DB, $reminder, $now, $next);
                 continue;
             }
 
@@ -114,14 +116,14 @@ class send_reminders extends \core\task\scheduled_task {
                 ]);
             } catch (\Throwable $e) {}
 
-            $this->advance_nextrun($DB, $reminder, $now);
+            $next = self::calc_next_run($reminder->frequency, $now, $reminder->intervaldays ?? null);
+            $this->advance_nextrun($DB, $reminder, $now, $next);
             \mtrace("  ✓ Sent to {$sent} learner(s) via [{$channels_used}]. Next: "
-                . \userdate(self::calc_next_run($reminder->frequency, $now)));
+                . \userdate($next));
         }
     }
 
-    private function advance_nextrun(\moodle_database $DB, object $reminder, int $now): void {
-        $next = self::calc_next_run($reminder->frequency, $now);
+    private function advance_nextrun(\moodle_database $DB, object $reminder, int $now, int $next): void {
         try {
             $DB->update_record('local_learnpath_reminders', (object)[
                 'id'      => $reminder->id,
@@ -134,18 +136,36 @@ class send_reminders extends \core\task\scheduled_task {
     }
 
     /**
-     * Calculate the next run timestamp.
+     * Calculate the NEXT run timestamp after a send has just gone out.
      * Uses a simple +period calculation — no timezone-dependent hour pinning,
      * because the Moodle task itself now runs every 30 minutes so timing is
      * accurate to within 30 minutes regardless of site timezone.
+     *
+     * 'once' parks 10 years out on purpose: a "once" rule is manual-trigger-only
+     * (via the "Send Now" button) and must never be picked up by cron again.
      */
-    public static function calc_next_run(string $frequency, int $from): int {
+    public static function calc_next_run(string $frequency, int $from, ?int $intervaldays = null): int {
         return match($frequency) {
-            'once'    => strtotime('+10 years', $from),
-            'daily'   => strtotime('+1 day',    $from),
-            'weekly'  => strtotime('+7 days',   $from),
-            'monthly' => strtotime('+1 month',  $from),
-            default   => strtotime('+7 days',   $from),
+            'once'     => strtotime('+10 years', $from),
+            'daily'    => strtotime('+1 day',    $from),
+            'interval' => strtotime('+' . max(1, (int)($intervaldays ?: 3)) . ' days', $from),
+            'weekly'   => strtotime('+7 days',   $from),
+            'monthly'  => strtotime('+1 month',  $from),
+            default    => strtotime('+7 days',   $from),
         };
+    }
+
+    /**
+     * Initial nextrun for a BRAND NEW reminder rule.
+     * Recurring frequencies become eligible on the very next cron tick (rather
+     * than waiting a full period before their first send, which is what made
+     * newly-created reminders look "broken" for the first day/week/month).
+     * 'once' keeps the +10-years park — it only ever fires via manual "Send Now".
+     */
+    public static function first_nextrun(string $frequency, ?int $intervaldays = null): int {
+        if ($frequency === 'once') {
+            return self::calc_next_run($frequency, time(), $intervaldays);
+        }
+        return time();
     }
 }

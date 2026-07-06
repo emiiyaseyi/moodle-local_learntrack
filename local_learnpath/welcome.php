@@ -103,6 +103,66 @@ foreach ($features as [$icon,$title,$desc]) {
 }
 echo '</div>';
 
+// Cron & Delivery Health — lets an admin see at a glance whether reminders
+// and reports are actually flowing, instead of needing to read cron logs.
+if ($isadmin) {
+    $tasks = [
+        '\\local_learnpath\\task\\send_reminders'         => 'Reminders',
+        '\\local_learnpath\\task\\send_scheduled_reports' => 'Scheduled reports',
+        '\\local_learnpath\\task\\refresh_progress_cache' => 'Progress cache refresh',
+    ];
+    $now = time();
+    $overdue_threshold = 2 * HOURSECS;
+
+    $overdue_reminders = (int)$DB->count_records_select(
+        'local_learnpath_reminders',
+        'enabled = 1 AND nextrun IS NOT NULL AND nextrun < :cutoff',
+        ['cutoff' => $now - $overdue_threshold]
+    );
+    $overdue_schedules = (int)$DB->count_records_select(
+        'local_learnpath_schedules',
+        'enabled = 1 AND nextrun < :cutoff',
+        ['cutoff' => $now - $overdue_threshold]
+    );
+
+    echo '<h3 style="font-family:var(--lt-font);font-size:.8rem;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;margin:24px 0 10px">🩺 CRON &amp; DELIVERY HEALTH</h3>';
+    echo '<div class="lt-feat-card" style="margin-bottom:22px">';
+    echo '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-family:var(--lt-font);font-size:.82rem">';
+    echo '<thead><tr style="text-align:left;color:#6b7280;font-size:.72rem;text-transform:uppercase;letter-spacing:.4px">'
+        . '<th style="padding:6px 10px 6px 0">Task</th><th>Last run</th><th>Next run</th><th>Status</th></tr></thead><tbody>';
+    foreach ($tasks as $classname => $label) {
+        $row = $DB->get_record('task_scheduled', ['classname' => $classname]);
+        $last = ($row && $row->lastruntime) ? userdate($row->lastruntime, get_string('strftimedatetimeshort')) : 'Never run';
+        $next = ($row && $row->nextruntime) ? userdate($row->nextruntime, get_string('strftimedatetimeshort')) : '—';
+        if (!$row) {
+            $status = '<span style="color:#be123c;font-weight:700">Not registered</span>';
+        } elseif (!empty($row->disabled)) {
+            $status = '<span style="color:#be123c;font-weight:700">Disabled</span>';
+        } elseif (!empty($row->faildelay)) {
+            $status = '<span style="color:#b45309;font-weight:700">Failing (retry delay ' . (int)$row->faildelay . 's)</span>';
+        } else {
+            $status = '<span style="color:#065f46;font-weight:700">OK</span>';
+        }
+        echo '<tr style="border-top:1px solid #f3f4f6"><td style="padding:8px 10px 8px 0;font-weight:700">' . s($label) . '</td>'
+            . '<td style="padding:8px 10px">' . $last . '</td><td style="padding:8px 10px">' . $next . '</td>'
+            . '<td style="padding:8px 10px">' . $status . '</td></tr>';
+    }
+    echo '</tbody></table></div>';
+    echo '<p style="font-family:var(--lt-font);font-size:.78rem;color:#6b7280;margin:12px 0 0">';
+    echo $overdue_reminders > 0
+        ? '⚠️ <strong>' . $overdue_reminders . '</strong> reminder rule(s) are overdue by more than 2 hours — check that site cron is running.'
+        : '✅ No reminder rules are overdue.';
+    echo '<br>';
+    echo $overdue_schedules > 0
+        ? '⚠️ <strong>' . $overdue_schedules . '</strong> report schedule(s) (including weekly manager reports) are overdue by more than 2 hours — check that site cron is running.'
+        : '✅ No report schedules are overdue.';
+    echo '</p>';
+    echo '<p style="font-family:var(--lt-font);font-size:.74rem;color:#9ca3af;margin:10px 0 0">If a task shows "Not registered" or an unexpected next-run time, go to '
+        . html_writer::link(new moodle_url('/admin/tool/task/scheduledtasks.php'), 'Site Administration → Server → Scheduled tasks')
+        . ' and use "Reset to default" on the LearnTrack tasks.</p>';
+    echo '</div>';
+}
+
 // Quick nav — BELOW features, 2-column grid
 $navlinks = [
     ['/local/learnpath/index.php',      '📊','Dashboard',      'View learner progress'],

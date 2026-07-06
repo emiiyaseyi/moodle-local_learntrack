@@ -106,6 +106,17 @@ if ($action === 'remove' && $userid && confirm_sesskey()) {
     );
 }
 
+if ($action === 'remove_all' && confirm_sesskey()) {
+    $removed = $DB->count_records('local_learnpath_user_assign', ['groupid' => $groupid]);
+    $DB->delete_records('local_learnpath_user_assign', ['groupid' => $groupid]);
+    redirect(
+        new moodle_url('/local/learnpath/learners.php', ['groupid' => $groupid]),
+        $removed . ' learner(s) removed from path. All enrolled users are now tracked instead.',
+        null,
+        \core\output\notification::NOTIFY_SUCCESS
+    );
+}
+
 if ($action === 'add' && confirm_sesskey()) {
     $raw = optional_param('userids', '', PARAM_TEXT);
     $ids = array_filter(array_map('intval', explode(',', $raw)));
@@ -374,7 +385,19 @@ $total = count($assigned);
 echo '<div class="lt-card">';
 echo '<div class="lt-card-header">';
 echo '<h3 class="lt-card-title">Assigned Learners</h3>';
+echo '<span style="display:flex;align-items:center;gap:10px">';
 echo '<span class="lt-card-meta">' . $total . ' learner' . ($total !== 1 ? 's' : '') . '</span>';
+if ($total > 0) {
+    $removeall_url = new moodle_url('/local/learnpath/learners.php', [
+        'groupid' => $groupid, 'action' => 'remove_all', 'sesskey' => sesskey(),
+    ]);
+    echo html_writer::link($removeall_url, '🗑 Remove All', [
+        'class'   => 'lt-action-btn lt-btn-del',
+        'onclick' => "return confirm('Remove all " . $total . " individually assigned learner(s) from this path? "
+            . "This restricts nothing afterwards — everyone enrolled in the path\\'s courses will be tracked instead.')",
+    ]);
+}
+echo '</span>';
 echo '</div>';
 
 if (empty($assigned)) {
