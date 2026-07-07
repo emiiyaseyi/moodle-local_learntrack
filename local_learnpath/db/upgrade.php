@@ -1059,5 +1059,30 @@ function xmldb_local_learnpath_upgrade(int $oldversion): bool {
         upgrade_plugin_savepoint(true, 2026050137, 'local', 'learnpath');
     }
 
+    if ($oldversion < 2026050138) {
+        // v1.0.0 (2026050138): Close the remaining crash gaps in the two
+        // sending tasks.
+        //
+        // ROOT CAUSE: once real site cron started running, Reminders and
+        // Scheduled reports kept getting marked "Failing" while Progress
+        // cache refresh succeeded — proving the shared completion-calc code
+        // (hardened in 2026050137) was NOT the cause, since all three tasks
+        // touch it. The actual gap: in send_reminders.php, the per-reminder
+        // call to data_helper::get_progress_detail() sat OUTSIDE any
+        // try/catch; in send_scheduled_reports.php, the per-schedule call to
+        // get_manager_emails() sat OUTSIDE any try/catch. An exception in
+        // either would propagate straight out of execute() and crash the
+        // whole task run.
+        //
+        // FIX: both tasks now wrap their entire per-reminder / per-schedule
+        // body in a try/catch (process_reminder()/process_schedule()), so a
+        // single bad reminder or schedule can log an error and be skipped
+        // (with nextrun still advanced, so it doesn't retry every tick
+        // forever) without taking down the rest of the run.
+        //
+        // No DB schema changes.
+        upgrade_plugin_savepoint(true, 2026050138, 'local', 'learnpath');
+    }
+
     return true;
 }

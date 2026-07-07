@@ -326,6 +326,59 @@ guessing further.
 
 ---
 
+## 6. Second crash-hardening pass — the actual exposed gap
+
+### Problem reported
+After real site cron started firing (crontab was fixed — see hosting notes below),
+"Reminders" and "Scheduled reports" kept showing **"Failing"** with escalating retry
+delay, while "Progress cache refresh" consistently showed **"OK"**.
+
+### Root cause
+Since all three tasks share the same completion-calculation code (hardened in
+`2026050137`), and only two of the three were failing, the completion calc was cleared
+as a suspect. The real gap was narrower and task-specific:
+
+- `send_reminders.php`: the per-reminder call to `data_helper::get_progress_detail()`
+  sat completely outside any try/catch.
+- `send_scheduled_reports.php`: the per-schedule call to `get_manager_emails()` sat
+  completely outside any try/catch.
+
+Either call throwing would propagate straight out of `execute()` and crash the whole
+task run, exactly matching the observed pattern (the two tasks with an actual
+per-item processing loop failed; the one that never sends anything — progress cache
+refresh — didn't).
+
+### Changes made
+
+**`local_learnpath/classes/task/send_reminders.php`**
+- The entire per-reminder body was extracted into `process_reminder()`, called from
+  the loop inside a try/catch. One bad reminder/group now logs an error via `mtrace()`
+  and is skipped (with `nextrun` still advanced, so it doesn't retry every tick
+  forever) instead of crashing the rest of the run.
+
+**`local_learnpath/classes/task/send_scheduled_reports.php`**
+- Same pattern: extracted into `process_schedule($DB, $schedule, $now)`, called inside
+  a try/catch from the loop.
+
+**`local_learnpath/db/upgrade.php`** (new savepoint `2026050138`)
+- Documents the fix. No schema changes.
+
+### Hosting note (not a code issue)
+Separately: the site's crontab had **7 jobs**, several of which were leftover attempts
+to trigger Moodle cron pointed at the wrong path (missing a `/public` segment that
+turned out to be part of the real document root, `/home/learnmeri/public_html/public`)
+or using a non-existent PHP binary (`ea-php99`). None of them had ever actually been
+invoking Moodle's cron successfully — which is why "Run Now" was needed every time.
+Corrected to a single job:
+```
+/opt/cpanel/ea-php81/root/usr/bin/php -q /home/learnmeri/public_html/public/admin/cli/cron.php
+```
+running every minute. This is what surfaced the real bug above — real cron finally
+running exposed a code path that manual single-click testing (which always hit the
+"nothing due" fast path) never exercised.
+
+---
+
 ## Version history
 
 | Version | Change |
@@ -334,6 +387,7 @@ guessing further.
 | `2026050135` | Additive-only `local_learnpath_user_assign` writes; fixes silent learner-assignment loss |
 | `2026050136` | Manual "Run Now" button for scheduled tasks; completion tracker rewritten to mirror Moodle's own criteria-based numbers |
 | `2026050137` | Reliability fix — completion calc can no longer crash a cron task; Run Now status badge refreshes correctly |
+| `2026050138` | Reliability fix — per-reminder/per-schedule processing can no longer crash send_reminders/send_scheduled_reports |
 
 ## Post-deploy checklist
 1. Run the site upgrade (Site Administration → Notifications) to apply the savepoints.
@@ -342,10 +396,9 @@ guessing further.
 3. Check the new "🩺 Cron & Delivery Health" panel on the LearnTrack Welcome page.
 4. Add a learner via Manage Individual Learners, then edit that path's deadline via
    Manage Paths — confirm the learner still appears in their dashboard block afterward.
-5. As a site admin, try "▶ Run Now" on each task and confirm both Last Run *and*
-   Status update without a page reload. Separately, arrange for real server cron to
-   run `admin/cli/cron.php` periodically (e.g. every minute via crontab) if it isn't
-   already.
+5. Confirm real server cron is running on its own (crontab pointed at the correct
+   Moodle path, every minute) — Last Run should advance without ever clicking
+   "Run Now".
 6. Open the same course's Moodle Course Completion report side-by-side with
    LearnTrack's dashboard for that course and confirm the completed-count and
    percentages now match.

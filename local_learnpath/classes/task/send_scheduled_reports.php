@@ -37,36 +37,50 @@ class send_scheduled_reports extends \core\task\scheduled_task {
         \mtrace('LearnTrack Reports: ' . count($schedules) . ' schedule(s) due.');
 
         foreach ($schedules as $schedule) {
-            \mtrace("LearnTrack Reports: Schedule [{$schedule->id}]"
-                . " group={$schedule->groupid} freq={$schedule->frequency}"
-                . " type=" . ($schedule->recipienttype ?? 'manual'));
-
-            $recipients = ($schedule->recipienttype ?? 'manual') === 'managers'
-                ? $this->get_manager_emails((int)$schedule->groupid)
-                : array_filter(array_map('trim', explode(',', $schedule->recipients)));
-
-            if (empty($recipients)) {
-                \mtrace("  ✗ No valid recipients — skipping.");
-                $this->advance_schedule($DB, $schedule, $now);
-                continue;
-            }
-
+            // Whole per-schedule body wrapped so ONE bad schedule/group can
+            // never crash the entire task and get it marked "Failing" by
+            // Moodle's cron runner.
             try {
-                $ok = export_manager::email_report(
-                    (int)$schedule->groupid,
-                    $recipients,
-                    $schedule->format,
-                    $schedule->viewmode ?? 'summary',
-                    \get_admin()->id
-                );
-                \mtrace($ok ? "  ✓ Sent to: " . implode(', ', $recipients)
-                            : "  ✗ email_report returned false.");
+                $this->process_schedule($DB, $schedule, $now);
             } catch (\Throwable $e) {
-                \mtrace("  ✗ Exception: " . $e->getMessage());
+                \mtrace("  ✗ Schedule [{$schedule->id}] failed: " . $e->getMessage());
+                // Still advance nextrun so a persistently-broken schedule
+                // doesn't retry every single cron tick forever.
+                $this->advance_schedule($DB, $schedule, $now);
             }
-
-            $this->advance_schedule($DB, $schedule, $now);
         }
+    }
+
+    private function process_schedule(\moodle_database $DB, object $schedule, int $now): void {
+        \mtrace("LearnTrack Reports: Schedule [{$schedule->id}]"
+            . " group={$schedule->groupid} freq={$schedule->frequency}"
+            . " type=" . ($schedule->recipienttype ?? 'manual'));
+
+        $recipients = ($schedule->recipienttype ?? 'manual') === 'managers'
+            ? $this->get_manager_emails((int)$schedule->groupid)
+            : array_filter(array_map('trim', explode(',', $schedule->recipients)));
+
+        if (empty($recipients)) {
+            \mtrace("  ✗ No valid recipients — skipping.");
+            $this->advance_schedule($DB, $schedule, $now);
+            return;
+        }
+
+        try {
+            $ok = export_manager::email_report(
+                (int)$schedule->groupid,
+                $recipients,
+                $schedule->format,
+                $schedule->viewmode ?? 'summary',
+                \get_admin()->id
+            );
+            \mtrace($ok ? "  ✓ Sent to: " . implode(', ', $recipients)
+                        : "  ✗ email_report returned false.");
+        } catch (\Throwable $e) {
+            \mtrace("  ✗ Exception: " . $e->getMessage());
+        }
+
+        $this->advance_schedule($DB, $schedule, $now);
     }
 
     /**

@@ -30,97 +30,113 @@ class send_reminders extends \core\task\scheduled_task {
         \mtrace('LearnTrack Reminders: ' . count($reminders) . ' reminder(s) due.');
 
         foreach ($reminders as $reminder) {
-            \mtrace("LearnTrack Reminders: [{$reminder->id}] '{$reminder->name}'"
-                . " freq={$reminder->frequency} group={$reminder->groupid}");
-
-            $group = $DB->get_record('local_learnpath_groups', ['id' => $reminder->groupid]);
-            if (!$group) {
-                \mtrace("  ✗ Group {$reminder->groupid} not found — skipping.");
-                $next = self::calc_next_run($reminder->frequency, $now, $reminder->intervaldays ?? null);
-                $this->advance_nextrun($DB, $reminder, $now, $next);
-                continue;
-            }
-
-            $allrows = data_helper::get_progress_detail((int)$reminder->groupid, \get_admin()->id);
-
-            $by_user = [];
-            foreach ($allrows as $row) {
-                $by_user[$row->userid][] = $row;
-            }
-
-            if (empty($by_user)) {
-                \mtrace("  — No learners in group.");
-                $next = self::calc_next_run($reminder->frequency, $now, $reminder->intervaldays ?? null);
-                $this->advance_nextrun($DB, $reminder, $now, $next);
-                continue;
-            }
-
-            $sent        = 0;
-            $sent_email  = false;
-            $sent_inapp  = false;
-            $sent_sms    = false;
-
-            foreach ($by_user as $uid => $courses) {
-                $completed = 0;
-                $total     = count($courses);
-                foreach ($courses as $c) {
-                    if ($c->status === 'complete') $completed++;
-                }
-                $pct = $total > 0 ? (int)round($completed / $total * 100) : 0;
-
-                $match = match($reminder->target) {
-                    'notstarted' => ($pct === 0),
-                    'inprogress' => ($pct > 0 && $pct < 100),
-                    'incomplete' => ($pct < 100),
-                    default      => false,
-                };
-
-                if (!$match) continue;
-
-                if ($reminder->frequency === 'once') {
-                    $already = $DB->record_exists('local_learnpath_reminder_log', [
-                        'reminderid' => $reminder->id,
-                        'userid'     => $uid,
-                    ]);
-                    if ($already) continue;
-                }
-
-                $learner = $DB->get_record('user', ['id' => $uid, 'deleted' => 0]);
-                if (!$learner) continue;
-
-                try {
-                    $results = notifier::send_reminder($reminder, $learner, $group, $courses);
-                    if ($results['email']) $sent_email = true;
-                    if ($results['inapp'])  $sent_inapp = true;
-                    if ($results['sms'])    $sent_sms   = true;
-                    $sent++;
-                } catch (\Throwable $e) {
-                    \mtrace("  ✗ {$learner->email}: " . $e->getMessage());
-                }
-            }
-
-            // Insert ONE batch-summary row (userid=0) per dispatch so the history
-            // tab shows a single clean entry instead of one row per learner.
-            $channels_used = implode('+', array_filter([
-                $sent_email ? 'email' : '',
-                $sent_inapp ? 'inapp' : '',
-                $sent_sms   ? 'sms'   : '',
-            ]));
+            // Whole per-reminder body wrapped so ONE bad reminder/group can
+            // never crash the entire task and get it marked "Failing" by
+            // Moodle's cron runner — any unexpected failure here is logged
+            // via mtrace and the loop moves on to the next reminder.
             try {
-                $DB->insert_record('local_learnpath_reminder_log', (object)[
-                    'reminderid' => $reminder->id,
-                    'userid'     => 0,   // 0 = batch summary, not a real user
-                    'channel'    => $channels_used ?: 'none',
-                    'timesent'   => $now,
-                    'status'     => $sent > 0 ? 'sent' : 'no_match',
-                ]);
-            } catch (\Throwable $e) {}
+                $this->process_reminder($DB, $reminder, $now);
+            } catch (\Throwable $e) {
+                \mtrace("  ✗ Reminder [{$reminder->id}] failed: " . $e->getMessage());
+                // Still advance nextrun so a persistently-broken reminder
+                // doesn't retry every single cron tick forever.
+                $next = self::calc_next_run($reminder->frequency, $now, $reminder->intervaldays ?? null);
+                $this->advance_nextrun($DB, $reminder, $now, $next);
+            }
+        }
+    }
 
+    private function process_reminder(\moodle_database $DB, object $reminder, int $now): void {
+        \mtrace("LearnTrack Reminders: [{$reminder->id}] '{$reminder->name}'"
+            . " freq={$reminder->frequency} group={$reminder->groupid}");
+
+        $group = $DB->get_record('local_learnpath_groups', ['id' => $reminder->groupid]);
+        if (!$group) {
+            \mtrace("  ✗ Group {$reminder->groupid} not found — skipping.");
             $next = self::calc_next_run($reminder->frequency, $now, $reminder->intervaldays ?? null);
             $this->advance_nextrun($DB, $reminder, $now, $next);
-            \mtrace("  ✓ Sent to {$sent} learner(s) via [{$channels_used}]. Next: "
-                . \userdate($next));
+            return;
         }
+
+        $allrows = data_helper::get_progress_detail((int)$reminder->groupid, \get_admin()->id);
+
+        $by_user = [];
+        foreach ($allrows as $row) {
+            $by_user[$row->userid][] = $row;
+        }
+
+        if (empty($by_user)) {
+            \mtrace("  — No learners in group.");
+            $next = self::calc_next_run($reminder->frequency, $now, $reminder->intervaldays ?? null);
+            $this->advance_nextrun($DB, $reminder, $now, $next);
+            return;
+        }
+
+        $sent        = 0;
+        $sent_email  = false;
+        $sent_inapp  = false;
+        $sent_sms    = false;
+
+        foreach ($by_user as $uid => $courses) {
+            $completed = 0;
+            $total     = count($courses);
+            foreach ($courses as $c) {
+                if ($c->status === 'complete') $completed++;
+            }
+            $pct = $total > 0 ? (int)round($completed / $total * 100) : 0;
+
+            $match = match($reminder->target) {
+                'notstarted' => ($pct === 0),
+                'inprogress' => ($pct > 0 && $pct < 100),
+                'incomplete' => ($pct < 100),
+                default      => false,
+            };
+
+            if (!$match) continue;
+
+            if ($reminder->frequency === 'once') {
+                $already = $DB->record_exists('local_learnpath_reminder_log', [
+                    'reminderid' => $reminder->id,
+                    'userid'     => $uid,
+                ]);
+                if ($already) continue;
+            }
+
+            $learner = $DB->get_record('user', ['id' => $uid, 'deleted' => 0]);
+            if (!$learner) continue;
+
+            try {
+                $results = notifier::send_reminder($reminder, $learner, $group, $courses);
+                if ($results['email']) $sent_email = true;
+                if ($results['inapp'])  $sent_inapp = true;
+                if ($results['sms'])    $sent_sms   = true;
+                $sent++;
+            } catch (\Throwable $e) {
+                \mtrace("  ✗ {$learner->email}: " . $e->getMessage());
+            }
+        }
+
+        // Insert ONE batch-summary row (userid=0) per dispatch so the history
+        // tab shows a single clean entry instead of one row per learner.
+        $channels_used = implode('+', array_filter([
+            $sent_email ? 'email' : '',
+            $sent_inapp ? 'inapp' : '',
+            $sent_sms   ? 'sms'   : '',
+        ]));
+        try {
+            $DB->insert_record('local_learnpath_reminder_log', (object)[
+                'reminderid' => $reminder->id,
+                'userid'     => 0,   // 0 = batch summary, not a real user
+                'channel'    => $channels_used ?: 'none',
+                'timesent'   => $now,
+                'status'     => $sent > 0 ? 'sent' : 'no_match',
+            ]);
+        } catch (\Throwable $e) {}
+
+        $next = self::calc_next_run($reminder->frequency, $now, $reminder->intervaldays ?? null);
+        $this->advance_nextrun($DB, $reminder, $now, $next);
+        \mtrace("  ✓ Sent to {$sent} learner(s) via [{$channels_used}]. Next: "
+            . \userdate($next));
     }
 
     private function advance_nextrun(\moodle_database $DB, object $reminder, int $now, int $next): void {
