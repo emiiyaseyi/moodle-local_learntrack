@@ -11,6 +11,13 @@ Developed by [Michael Adeniran](https://www.linkedin.com/in/michaeladeniran) · 
 
 ---
 
+## Screenshots
+
+See the [repository README](../README.md#screenshots) for screenshots of the welcome
+page, feature overview, and navigation.
+
+---
+
 ## Overview
 
 LearnTrack solves a common pain point for Moodle administrators, HR managers, and training coordinators: **tracking learner progress across a group of related courses without opening each course individually.**
