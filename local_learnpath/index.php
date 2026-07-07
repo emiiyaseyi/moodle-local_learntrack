@@ -380,24 +380,18 @@ function local_learnpath_render_comparison(int $groupid, int $viewerid, string $
     $course_ids  = array_values(array_map(fn($c) => $c->id, $gcourses));
     list($ucids, $ucparams) = $DB->get_in_or_equal($course_ids,  SQL_PARAMS_NAMED, 'ucid');
     list($uids,  $uparams)  = $DB->get_in_or_equal($learner_ids, SQL_PARAMS_NAMED, 'uid');
+    // "Must-do" totals/done — mirrors Moodle's own completion criteria when
+    // configured, falling back to completion-tracked activities otherwise
+    // (see helper::get_completion_totals_bulk()/get_completion_done_bulk()).
     $course_totals = [];
-    foreach ($gcourses as $c) {
-        $course_totals[$c->id] = (int)$DB->count_records_sql(
-            "SELECT COUNT(id) FROM {course_modules} WHERE course=:cid AND completion>0 AND deletioninprogress=0",
-            ['cid' => $c->id]
-        );
+    $mod_done      = [];
+    try {
+        $totals_map = \local_learnpath\data\helper::get_completion_totals_bulk($course_ids);
+        $course_totals = array_map(fn($t) => $t['total'], $totals_map);
+        $mod_done = \local_learnpath\data\helper::get_completion_done_bulk($course_ids, $learner_ids, $totals_map);
+    } catch (\Throwable $e) {
+        debugging('LearnTrack comparison view: completion calc failed: ' . $e->getMessage(), DEBUG_DEVELOPER);
     }
-    $mod_rows = $DB->get_records_sql(
-        "SELECT " . $DB->sql_concat('cmc.userid', "'_'", 'cm.course') . " AS rowkey,
-                cmc.userid, cm.course, COUNT(cmc.id) AS done
-         FROM {course_modules_completion} cmc
-         JOIN {course_modules} cm ON cm.id=cmc.coursemoduleid AND cm.completion>0 AND cm.deletioninprogress=0
-         WHERE cmc.completionstate IN (1,2) AND cm.course {$ucids} AND cmc.userid {$uids}
-         GROUP BY cmc.userid, cm.course",
-        array_merge($ucparams, $uparams)
-    );
-    $mod_done = [];
-    foreach ($mod_rows as $mr) { $mod_done[$mr->userid][$mr->course] = (int)$mr->done; }
     $cc_rows = $DB->get_records_sql(
         "SELECT " . $DB->sql_concat('userid', "'_'", 'course') . " AS rowkey,
                 userid, course FROM {course_completions}

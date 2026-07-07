@@ -18,15 +18,137 @@
 require_once(__DIR__ . '/../../config.php');
 require_login();
 require_capability('local/learnpath:viewdashboard', context_system::instance());
+
+/**
+ * Status badge HTML for a {task_scheduled} row — shared between the table
+ * render and the "Run Now" JSON response so both agree on what "OK" means.
+ */
+function local_learnpath_task_status_html(?\stdClass $row): string {
+    if (!$row) {
+        return '<span style="color:#be123c;font-weight:700">Not registered</span>';
+    }
+    if (!empty($row->disabled)) {
+        return '<span style="color:#be123c;font-weight:700">Disabled</span>';
+    }
+    if (!empty($row->faildelay)) {
+        return '<span style="color:#b45309;font-weight:700">Failing (retry delay ' . (int)$row->faildelay . 's)</span>';
+    }
+    return '<span style="color:#065f46;font-weight:700">OK</span>';
+}
 $PAGE->set_url(new moodle_url('/local/learnpath/welcome.php'));
 $PAGE->set_context(context_system::instance());
 $PAGE->set_pagelayout('report');
 $PAGE->set_title('LearnTrack — Welcome');
 global $DB, $OUTPUT;
-$isadmin = has_capability('local/learnpath:manage', context_system::instance());
+$isadmin      = has_capability('local/learnpath:manage', context_system::instance());
+$cansiteconfig = has_capability('moodle/site:config', context_system::instance());
 $brand   = get_config('local_learnpath', 'brand_color') ?: '#1e3a5f';
 $gcount  = $DB->count_records('local_learnpath_groups');
 $ccount  = $DB->count_records('local_learnpath_group_courses');
+
+// ── Manual "Run Now" for a LearnTrack scheduled task ────────────────────────
+// Site cron can be entirely unconfigured on some hosts (every task on the
+// whole site shows "Never run", not just LearnTrack's) — this gives an admin
+// a way to force a task to run right now and confirm the mechanism itself
+// works, without waiting on server cron. This executes the REAL task, with
+// real side effects (it will send whatever reminders/reports are currently
+// due) — it is not a dry run. Restricted to moodle/site:config because it
+// executes core Moodle scheduled-task code, not just LearnTrack data.
+//
+// Triggered via fetch() as a background request (see JS below) so a slow
+// task doesn't freeze the page — the button shows "Running…" while the
+// request is in flight and only that task's row updates when it resolves;
+// nothing else on the page is blocked or reloaded.
+$run_task_action = optional_param('lt_run_task', '', PARAM_RAW);
+if ($run_task_action !== '') {
+    header('Content-Type: application/json');
+
+    if (!$cansiteconfig || !confirm_sesskey()) {
+        http_response_code(403);
+        echo json_encode(['ok' => false, 'message' => 'Not permitted.']);
+        exit;
+    }
+
+    $allowed_tasks = [
+        '\\local_learnpath\\task\\send_reminders',
+        '\\local_learnpath\\task\\send_scheduled_reports',
+        '\\local_learnpath\\task\\refresh_progress_cache',
+    ];
+    if (!in_array($run_task_action, $allowed_tasks, true)) {
+        http_response_code(400);
+        echo json_encode(['ok' => false, 'message' => 'Unknown task.']);
+        exit;
+    }
+
+    // Simple overlap guard so a double-click (or a real cron run landing at
+    // the same moment) can't run the same task twice concurrently.
+    $lockkey = 'manual_run_lock_' . md5($run_task_action);
+    $lockval = (int)(get_config('local_learnpath', $lockkey) ?: 0);
+    if ($lockval && (time() - $lockval) < 120) {
+        echo json_encode(['ok' => false, 'message' => 'Already running (started less than 2 minutes ago) — please wait.']);
+        exit;
+    }
+    set_config($lockkey, time(), 'local_learnpath');
+
+    $task = \core\task\manager::get_scheduled_task($run_task_action);
+    if (!$task) {
+        unset_config($lockkey, 'local_learnpath');
+        echo json_encode(['ok' => false, 'message' => 'Task is not registered with Moodle — try "Reset to default" under Scheduled tasks first.']);
+        exit;
+    }
+
+    // A manually-triggered run can process a large overdue backlog the first
+    // time — don't let the default script time limit kill it partway through.
+    if (class_exists('\\core_php_time_limit')) {
+        \core_php_time_limit::raise();
+    } else {
+        @set_time_limit(0);
+    }
+
+    $ranok = true;
+    ob_start();
+    try {
+        $task->execute();
+    } catch (\Throwable $e) {
+        $ranok = false;
+        echo 'ERROR: ' . $e->getMessage();
+    }
+    $output = trim(ob_get_clean());
+
+    // Mirror what Moodle's real cron runner records so "Last run" / "Next
+    // run" reflect this manual execution, and future automatic runs stay on
+    // the correct schedule.
+    $DB->set_field('task_scheduled', 'lastruntime', time(), ['classname' => $run_task_action]);
+    if ($ranok) {
+        $DB->set_field('task_scheduled', 'faildelay', 0, ['classname' => $run_task_action]);
+    }
+    $nextruntime = null;
+    try {
+        $next = $task->get_next_scheduled_time();
+        if ($next) {
+            $DB->set_field('task_scheduled', 'nextruntime', $next, ['classname' => $run_task_action]);
+            $nextruntime = $next;
+        }
+    } catch (\Throwable $e) {
+        // Non-fatal — lastruntime is already recorded.
+    }
+    unset_config($lockkey, 'local_learnpath');
+
+    // Re-read the row so the status badge reflects exactly what's now in the
+    // DB (faildelay reset on success, or whatever a concurrent real cron run
+    // left behind) — not just what this one request assumed.
+    $freshrow = $DB->get_record('task_scheduled', ['classname' => $run_task_action]);
+
+    echo json_encode([
+        'ok'          => $ranok,
+        'message'     => ($ranok ? 'Ran successfully.' : 'Ran with an error.') . ' ' . ($output !== '' ? substr($output, -600) : '(no output)'),
+        'lastruntime' => userdate(time(), get_string('strftimedatetimeshort')),
+        'nextruntime' => $nextruntime ? userdate($nextruntime, get_string('strftimedatetimeshort')) : '—',
+        'statushtml'  => local_learnpath_task_status_html($freshrow),
+    ]);
+    exit;
+}
+
 echo $OUTPUT->header();
 echo local_learnpath_brand_css();
 echo '<style>'
@@ -129,25 +251,28 @@ if ($isadmin) {
     echo '<div class="lt-feat-card" style="margin-bottom:22px">';
     echo '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-family:var(--lt-font);font-size:.82rem">';
     echo '<thead><tr style="text-align:left;color:#6b7280;font-size:.72rem;text-transform:uppercase;letter-spacing:.4px">'
-        . '<th style="padding:6px 10px 6px 0">Task</th><th>Last run</th><th>Next run</th><th>Status</th></tr></thead><tbody>';
+        . '<th style="padding:6px 10px 6px 0">Task</th><th>Last run</th><th>Next run</th><th>Status</th>'
+        . ($cansiteconfig ? '<th></th>' : '') . '</tr></thead><tbody>';
     foreach ($tasks as $classname => $label) {
         $row = $DB->get_record('task_scheduled', ['classname' => $classname]);
-        $last = ($row && $row->lastruntime) ? userdate($row->lastruntime, get_string('strftimedatetimeshort')) : 'Never run';
-        $next = ($row && $row->nextruntime) ? userdate($row->nextruntime, get_string('strftimedatetimeshort')) : '—';
-        if (!$row) {
-            $status = '<span style="color:#be123c;font-weight:700">Not registered</span>';
-        } elseif (!empty($row->disabled)) {
-            $status = '<span style="color:#be123c;font-weight:700">Disabled</span>';
-        } elseif (!empty($row->faildelay)) {
-            $status = '<span style="color:#b45309;font-weight:700">Failing (retry delay ' . (int)$row->faildelay . 's)</span>';
-        } else {
-            $status = '<span style="color:#065f46;font-weight:700">OK</span>';
-        }
+        $last   = ($row && $row->lastruntime) ? userdate($row->lastruntime, get_string('strftimedatetimeshort')) : 'Never run';
+        $next   = ($row && $row->nextruntime) ? userdate($row->nextruntime, get_string('strftimedatetimeshort')) : '—';
+        $status = local_learnpath_task_status_html($row);
+        $rowid = 'lt-task-' . substr(md5($classname), 0, 10);
         echo '<tr style="border-top:1px solid #f3f4f6"><td style="padding:8px 10px 8px 0;font-weight:700">' . s($label) . '</td>'
-            . '<td style="padding:8px 10px">' . $last . '</td><td style="padding:8px 10px">' . $next . '</td>'
-            . '<td style="padding:8px 10px">' . $status . '</td></tr>';
+            . '<td id="' . $rowid . '-last" style="padding:8px 10px">' . $last . '</td>'
+            . '<td id="' . $rowid . '-next" style="padding:8px 10px">' . $next . '</td>'
+            . '<td id="' . $rowid . '-status" style="padding:8px 10px">' . $status . '</td>';
+        if ($cansiteconfig) {
+            echo '<td style="padding:8px 10px">'
+                . '<button type="button" id="' . $rowid . '-btn" class="lt-btn lt-btn-ghost lt-cron-run-btn" '
+                . 'data-task="' . s($classname) . '" data-rowid="' . $rowid . '" '
+                . 'style="font-size:.74rem;padding:5px 12px">▶ Run Now</button></td>';
+        }
+        echo '</tr>';
     }
     echo '</tbody></table></div>';
+    echo '<p id="lt-cron-run-msg" style="font-family:var(--lt-font);font-size:.78rem;margin:12px 0 0;display:none"></p>';
     echo '<p style="font-family:var(--lt-font);font-size:.78rem;color:#6b7280;margin:12px 0 0">';
     echo $overdue_reminders > 0
         ? '⚠️ <strong>' . $overdue_reminders . '</strong> reminder rule(s) are overdue by more than 2 hours — check that site cron is running.'
@@ -159,8 +284,77 @@ if ($isadmin) {
     echo '</p>';
     echo '<p style="font-family:var(--lt-font);font-size:.74rem;color:#9ca3af;margin:10px 0 0">If a task shows "Not registered" or an unexpected next-run time, go to '
         . html_writer::link(new moodle_url('/admin/tool/task/scheduledtasks.php'), 'Site Administration → Server → Scheduled tasks')
-        . ' and use "Reset to default" on the LearnTrack tasks.</p>';
+        . ' and use "Reset to default" on the LearnTrack tasks.';
+    if ($cansiteconfig) {
+        echo ' "Run Now" executes the task for real in the background — it will send whatever reminders/reports are currently due, it is not a test.';
+    }
+    echo '</p>';
     echo '</div>';
+
+    if ($cansiteconfig) {
+        $ajaxurl = (new moodle_url('/local/learnpath/welcome.php'))->out(false);
+        $sesskey = sesskey();
+        $PAGE->requires->js_init_code("
+(function(){
+    var busy = false;
+    document.querySelectorAll('.lt-cron-run-btn').forEach(function(btn){
+        btn.addEventListener('click', function(){
+            if (busy) return;
+            busy = true;
+            var task = btn.getAttribute('data-task');
+            var rowid = btn.getAttribute('data-rowid');
+            var msgEl = document.getElementById('lt-cron-run-msg');
+            var allBtns = document.querySelectorAll('.lt-cron-run-btn');
+            allBtns.forEach(function(b){ b.disabled = true; });
+            var original = btn.textContent;
+            btn.textContent = '⏳ Running…';
+            msgEl.style.display = 'none';
+
+            var params = new URLSearchParams();
+            params.set('lt_run_task', task);
+            params.set('sesskey', " . json_encode($sesskey) . ");
+
+            fetch(" . json_encode($ajaxurl) . ", {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: params.toString()
+            })
+            .then(function(r){ return r.json(); })
+            .then(function(data){
+                var lastEl   = document.getElementById(rowid + '-last');
+                var nextEl   = document.getElementById(rowid + '-next');
+                var statusEl = document.getElementById(rowid + '-status');
+                if (data.ok) {
+                    if (lastEl) lastEl.textContent = data.lastruntime;
+                    if (nextEl) nextEl.textContent = data.nextruntime;
+                }
+                // Always refresh the status badge — even on a reported success,
+                // a concurrent real cron run could have just marked it failing,
+                // and this re-reads the DB rather than assuming.
+                if (statusEl && data.statushtml) { statusEl.innerHTML = data.statushtml; }
+                msgEl.style.display = 'block';
+                msgEl.style.color = data.ok ? '#065f46' : '#be123c';
+                msgEl.textContent = (data.ok ? '✅ ' : '⚠️ ') + data.message;
+            })
+            .catch(function(err){
+                msgEl.style.display = 'block';
+                msgEl.style.color = '#be123c';
+                msgEl.textContent = '⚠️ Request failed: ' + err;
+            })
+            .finally(function(){
+                busy = false;
+                allBtns.forEach(function(b){ b.disabled = false; });
+                btn.textContent = original;
+            });
+        });
+    });
+})();
+");
+    }
 }
 
 // Quick nav — BELOW features, 2-column grid

@@ -632,20 +632,30 @@ class manager {
         $headers = ['First Name', 'Last Name', 'Email', 'Username', 'Status',
                     'Activities Done', 'Total Activities', 'Progress %', 'Grade', 'Completed Date'];
 
-        $total_mods = (int)$DB->count_records_sql(
-            "SELECT COUNT(id) FROM {course_modules} WHERE course=:cid AND completion>0 AND deletioninprogress=0",
-            ['cid' => $courseid]
-        );
-
+        // "Must-do" totals/done — mirrors Moodle's own completion criteria when
+        // configured, falling back to completion-tracked activities otherwise
+        // (see data\helper::get_completion_totals_bulk()/get_completion_done_bulk()).
+        $total_mods = 0;
         $mod_counts = [];
-        if ($total_mods > 0) {
-            $rows = $DB->get_records_sql(
-                "SELECT cmc.userid, COUNT(cmc.id) AS done FROM {course_modules_completion} cmc
-                 JOIN {course_modules} cm ON cm.id=cmc.coursemoduleid
-                 WHERE cm.course=:cid AND cmc.completionstate IN (1,2) AND cm.deletioninprogress=0
-                 GROUP BY cmc.userid", ['cid' => $courseid]
-            );
-            foreach ($rows as $r) { $mod_counts[$r->userid] = (int)$r->done; }
+        try {
+            $exp_totals_map = data_helper::get_completion_totals_bulk([$courseid]);
+            $total_mods     = $exp_totals_map[$courseid]['total'] ?? 0;
+
+            $exp_enrolled_uids = array_map('intval', $DB->get_fieldset_sql(
+                "SELECT DISTINCT ue.userid FROM {user_enrolments} ue
+                 JOIN {enrol} e ON e.id=ue.enrolid AND e.courseid=:cid",
+                ['cid' => $courseid]
+            ));
+            if ($total_mods > 0 && !empty($exp_enrolled_uids)) {
+                $exp_done_map = data_helper::get_completion_done_bulk(
+                    [$courseid], $exp_enrolled_uids, $exp_totals_map
+                );
+                foreach ($exp_done_map as $uid => $bycourse) {
+                    $mod_counts[$uid] = $bycourse[$courseid] ?? 0;
+                }
+            }
+        } catch (\Throwable $e) {
+            debugging('LearnTrack export_course(): completion calc failed: ' . $e->getMessage(), DEBUG_DEVELOPER);
         }
 
         $completed_uids = array_keys($DB->get_records_sql(

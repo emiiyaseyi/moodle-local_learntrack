@@ -156,6 +156,163 @@ class helper {
         return $learners;
     }
 
+    // ── COMPLETION (single source of truth — mirrors Moodle's own numbers) ─────
+
+    /**
+     * For each course, the "must-do" denominator for a completion percentage.
+     *
+     * Mirrors what Moodle's own Course Completion report divides by: when a
+     * course has completion criteria configured (course_completion_criteria —
+     * whatever mix of activity/grade/self/date conditions a teacher actually
+     * selected under Course Settings → Completion tracking), that count is
+     * authoritative. A course can have more completion-TRACKED activities than
+     * are actually REQUIRED for course completion, so counting every tracked
+     * activity (the old behaviour) diverges from Moodle whenever criteria are a
+     * subset. Falls back to counting completion-tracked activities only for
+     * courses with no criteria configured at all (nothing better to mirror).
+     *
+     * @return array [courseid => ['total' => int, 'source' => 'criteria'|'activities']]
+     */
+    public static function get_completion_totals_bulk(array $courseids): array {
+        global $DB;
+        $courseids = array_values(array_unique(array_map('intval', $courseids)));
+        if (empty($courseids)) {
+            return [];
+        }
+
+        $result = [];
+        foreach ($courseids as $cid) {
+            $result[$cid] = ['total' => 0, 'source' => 'activities'];
+        }
+
+        list($cins, $cps) = $DB->get_in_or_equal($courseids, SQL_PARAMS_NAMED, 'ctot');
+        try {
+            foreach ($DB->get_records_sql(
+                "SELECT course AS courseid, COUNT(id) AS cnt
+                 FROM {course_completion_criteria}
+                 WHERE course $cins
+                 GROUP BY course",
+                $cps
+            ) as $r) {
+                if ((int)$r->cnt > 0) {
+                    $result[(int)$r->courseid] = ['total' => (int)$r->cnt, 'source' => 'criteria'];
+                }
+            }
+        } catch (\Throwable $e) {
+            // course_completion_criteria always exists on supported Moodle
+            // versions, but stay defensive rather than fatal.
+        }
+
+        // Fallback for courses with no criteria configured.
+        $fallback_cids = array_keys(array_filter($result, fn($v) => $v['source'] === 'activities'));
+        if (!empty($fallback_cids)) {
+            list($fins, $fps) = $DB->get_in_or_equal($fallback_cids, SQL_PARAMS_NAMED, 'ctotfb');
+            foreach ($DB->get_records_sql(
+                "SELECT course AS courseid, COUNT(id) AS cnt
+                 FROM {course_modules}
+                 WHERE course $fins AND completion > 0 AND deletioninprogress = 0
+                 GROUP BY course",
+                $fps
+            ) as $r) {
+                $result[(int)$r->courseid]['total'] = (int)$r->cnt;
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * For each (user, course), how many of the "must-do" items are done —
+     * paired with get_completion_totals_bulk(). Courses using criteria are
+     * counted from course_completion_crit_compl (exactly what Moodle counts as
+     * "criteria met"); courses on the activities fallback are counted from
+     * course_modules_completion, same as before.
+     *
+     * @param array $totals_map Output of get_completion_totals_bulk() for the same $courseids.
+     * @param int $from_ts Optional — only count completions on/after this timestamp.
+     * @param int $to_ts Optional — only count completions on/before this timestamp.
+     * @return array [userid => [courseid => int]]
+     */
+    public static function get_completion_done_bulk(
+        array $courseids,
+        array $userids,
+        array $totals_map,
+        int   $from_ts = 0,
+        int   $to_ts = 0
+    ): array {
+        global $DB;
+        $courseids = array_values(array_unique(array_map('intval', $courseids)));
+        $userids   = array_values(array_unique(array_map('intval', $userids)));
+        if (empty($courseids) || empty($userids)) {
+            return [];
+        }
+
+        list($uins, $ups) = $DB->get_in_or_equal($userids, SQL_PARAMS_NAMED, 'cdu');
+
+        $criteria_cids = [];
+        $activity_cids = [];
+        foreach ($courseids as $cid) {
+            if (($totals_map[$cid]['source'] ?? 'activities') === 'criteria') {
+                $criteria_cids[] = $cid;
+            } else {
+                $activity_cids[] = $cid;
+            }
+        }
+
+        $done_map = [];
+
+        if (!empty($criteria_cids)) {
+            list($cins, $cps) = $DB->get_in_or_equal($criteria_cids, SQL_PARAMS_NAMED, 'cdc');
+            $params    = array_merge($cps, $ups);
+            $date_sql  = '';
+            if ($from_ts > 0) {
+                $date_sql = ' AND timecompleted >= :cdfrom AND timecompleted <= :cdto';
+                $params['cdfrom'] = $from_ts;
+                $params['cdto']   = $to_ts;
+            }
+            try {
+                foreach ($DB->get_records_sql(
+                    "SELECT " . $DB->sql_concat('userid', "'_'", 'course') . " AS rowkey,
+                            userid, course AS courseid, COUNT(id) AS cnt
+                     FROM {course_completion_crit_compl}
+                     WHERE course $cins AND userid $uins AND timecompleted IS NOT NULL{$date_sql}
+                     GROUP BY course, userid",
+                    $params
+                ) as $r) {
+                    $done_map[(int)$r->userid][(int)$r->courseid] = (int)$r->cnt;
+                }
+            } catch (\Throwable $e) {
+                // Stay defensive; falls through with 0s for these courses.
+            }
+        }
+
+        if (!empty($activity_cids)) {
+            list($ains, $aps) = $DB->get_in_or_equal($activity_cids, SQL_PARAMS_NAMED, 'cda');
+            $params   = array_merge($aps, $ups);
+            $date_sql = '';
+            if ($from_ts > 0) {
+                $date_sql = ' AND cmc.timemodified >= :cdafrom AND cmc.timemodified <= :cdato';
+                $params['cdafrom'] = $from_ts;
+                $params['cdato']   = $to_ts;
+            }
+            foreach ($DB->get_records_sql(
+                "SELECT " . $DB->sql_concat('cmc.userid', "'_'", 'cm.course') . " AS rowkey,
+                        cm.course AS courseid, cmc.userid, COUNT(cmc.id) AS cnt
+                 FROM {course_modules_completion} cmc
+                 JOIN {course_modules} cm ON cm.id = cmc.coursemoduleid
+                 WHERE cm.course $ains AND cmc.userid $uins
+                   AND cm.completion > 0 AND cm.deletioninprogress = 0
+                   AND cmc.completionstate IN (1,2){$date_sql}
+                 GROUP BY cm.course, cmc.userid",
+                $params
+            ) as $r) {
+                $done_map[(int)$r->userid][(int)$r->courseid] = (int)$r->cnt;
+            }
+        }
+
+        return $done_map;
+    }
+
     // ── PROGRESS CALCULATION ──────────────────────────────────────────────────
 
     /**
@@ -185,25 +342,21 @@ class helper {
         $row->firstaccess = $logdata->firstaccess ?? null;
         $row->lastaccess  = $logdata->lastaccess  ?? null;
 
-        // Activity counts
-        $ctx = \context_course::instance($courseid, IGNORE_MISSING);
-        if ($ctx) {
-            $row->total_activities = (int)$DB->count_records_sql(
-                "SELECT COUNT(cm.id) FROM {course_modules} cm
-                 WHERE cm.course = :cid AND cm.completion > 0 AND cm.deletioninprogress = 0",
-                ['cid' => $courseid]
-            );
-            $row->completed_activities = (int)$DB->count_records_sql(
-                "SELECT COUNT(cmc.id) FROM {course_modules_completion} cmc
-                 JOIN {course_modules} cm ON cm.id = cmc.coursemoduleid
-                 WHERE cm.course = :cid AND cmc.userid = :uid
-                   AND cm.completion > 0 AND cm.deletioninprogress = 0
-                   AND cmc.completionstate IN (1, 2)",
-                ['cid' => $courseid, 'uid' => $userid]
-            );
-        } else {
-            $row->total_activities     = 0;
-            $row->completed_activities = 0;
+        // "Must-do" totals/done — mirrors Moodle's own completion criteria when
+        // configured, falling back to completion-tracked activities otherwise.
+        // Never allowed to crash the caller (this runs inside cron tasks) —
+        // any unexpected failure here degrades to 0/0 for this row instead of
+        // taking down the whole task run.
+        $row->total_activities     = 0;
+        $row->completed_activities = 0;
+        try {
+            $totals_map = self::get_completion_totals_bulk([$courseid]);
+            $row->total_activities = $totals_map[$courseid]['total'] ?? 0;
+            $done_map = self::get_completion_done_bulk([$courseid], [$userid], $totals_map);
+            $row->completed_activities = $done_map[$userid][$courseid] ?? 0;
+        } catch (\Throwable $e) {
+            \debugging('LearnTrack get_course_progress(): completion calc failed for '
+                . "course={$courseid} user={$userid}: " . $e->getMessage(), DEBUG_DEVELOPER);
         }
 
         // ── Progress % — definitive rules ──────────────────────────────────
@@ -294,33 +447,20 @@ class helper {
             $cc_map[(int)$r->userid][(int)$r->courseid] = (int)$r->timecompleted;
         }
 
-        // Bulk 2: total completion-tracked activities per course
-        // First column is courseid — already unique per row (GROUP BY course). No rowkey needed.
-        $total_map = [];
-        foreach ($DB->get_records_sql(
-            "SELECT course AS courseid, COUNT(id) AS cnt
-             FROM {course_modules}
-             WHERE course $cins AND completion > 0 AND deletioninprogress = 0
-             GROUP BY course",
-            $cps
-        ) as $r) {
-            $total_map[(int)$r->courseid] = (int)$r->cnt;
-        }
-
-        // Bulk 3: completed activities per user per course
-        $done_map = [];
-        foreach ($DB->get_records_sql(
-            "SELECT " . $DB->sql_concat('cmc.userid', "'_'", 'cm.course') . " AS rowkey,
-                    cm.course AS courseid, cmc.userid, COUNT(cmc.id) AS cnt
-             FROM {course_modules_completion} cmc
-             JOIN {course_modules} cm ON cm.id = cmc.coursemoduleid
-             WHERE cm.course $cins AND cmc.userid $uins
-               AND cm.completion > 0 AND cm.deletioninprogress = 0
-               AND cmc.completionstate IN (1,2)
-             GROUP BY cm.course, cmc.userid",
-            $cup
-        ) as $r) {
-            $done_map[(int)$r->userid][(int)$r->courseid] = (int)$r->cnt;
+        // Bulk 2+3: "must-do" totals and per-user done counts — mirrors Moodle's
+        // own completion criteria when configured, falling back to
+        // completion-tracked activities otherwise (see get_completion_totals_bulk()
+        // / get_completion_done_bulk()). Never allowed to crash the caller (this
+        // runs inside cron tasks) — falls back to empty maps (0s everywhere)
+        // instead of taking down the whole task run.
+        $totals_map = [];
+        $done_map   = [];
+        try {
+            $totals_map = self::get_completion_totals_bulk($courseids);
+            $done_map   = self::get_completion_done_bulk($courseids, $learnerids, $totals_map);
+        } catch (\Throwable $e) {
+            \debugging('LearnTrack get_progress_detail(): completion calc failed for '
+                . "group={$groupid}: " . $e->getMessage(), DEBUG_DEVELOPER);
         }
 
         // Bulk 4: first/last access from log (last 365 days for performance)
@@ -360,7 +500,7 @@ class helper {
                 $row->coursename  = $course->fullname;
                 $row->timecompleted        = $cc_map[$uid][$cid] ?? null;
                 $row->completed            = (bool)$row->timecompleted;
-                $row->total_activities     = $total_map[$cid] ?? 0;
+                $row->total_activities     = $totals_map[$cid]['total'] ?? 0;
                 $row->completed_activities = $done_map[$uid][$cid] ?? 0;
                 $log              = $log_map[$uid][$cid] ?? null;
                 $row->firstaccess = $log ? (int)$log->firstaccess : null;
@@ -521,31 +661,25 @@ class helper {
             );
             $cc_set = array_flip($cc_done);
 
-            $total_map = [];
-            foreach ($DB->get_records_sql(
-                "SELECT course AS courseid, COUNT(id) AS cnt FROM {course_modules}
-                 WHERE course $cins AND completion > 0 AND deletioninprogress = 0
-                 GROUP BY course", $cps) as $r) {
-                $total_map[(int)$r->courseid] = (int)$r->cnt;
-            }
-            $done_map = [];
-            foreach ($DB->get_records_sql(
-                "SELECT cm.course AS courseid, COUNT(cmc.id) AS cnt
-                 FROM {course_modules_completion} cmc
-                 JOIN {course_modules} cm ON cm.id = cmc.coursemoduleid
-                 WHERE cm.course $cins AND cmc.userid = :uid
-                   AND cm.completion > 0 AND cm.deletioninprogress = 0
-                   AND cmc.completionstate IN (1,2)
-                 GROUP BY cm.course",
-                array_merge($cps, ['uid' => $userid])) as $r) {
-                $done_map[(int)$r->courseid] = (int)$r->cnt;
+            // "Must-do" totals/done — mirrors Moodle's own completion criteria
+            // when configured, falling back to completion-tracked activities.
+            // Never allowed to crash the caller (block widget) — falls back to
+            // empty maps (0s) on any unexpected failure.
+            $totals_map = [];
+            $done_map   = [];
+            try {
+                $totals_map = self::get_completion_totals_bulk($courseids);
+                $done_map   = self::get_completion_done_bulk($courseids, [$userid], $totals_map);
+            } catch (\Throwable $e) {
+                \debugging('LearnTrack get_user_path_progress(): completion calc failed for '
+                    . "group={$gid} user={$userid}: " . $e->getMessage(), DEBUG_DEVELOPER);
             }
 
             $done = 0; $tot = count($courses); $sum_act = 0;
             foreach ($courses as $c) {
                 $cid = (int)$c->id;
-                $ta  = $total_map[$cid] ?? 0;
-                $da  = $done_map[$cid]  ?? 0;
+                $ta  = $totals_map[$cid]['total'] ?? 0;
+                $da  = $done_map[$userid][$cid] ?? 0;
                 $is_complete = isset($cc_set[$cid]) || ($ta > 0 && $da >= $ta);
                 if ($is_complete) {
                     $done++;
@@ -746,31 +880,45 @@ class helper {
             return [];
         }
 
-        // Step 2: count learners who have completed ALL required activities in each course
-        // This matches what courseinsights.php shows (activity-based, not course_completions)
-        // First get total trackable activities per course
-        $sql_total_acts = "SELECT cm.course AS courseid, COUNT(cm.id) AS total_acts
-                            FROM {course_modules} cm
-                            JOIN {local_learnpath_group_courses} lgc ON lgc.courseid = cm.course
-                            WHERE cm.completion > 0 AND cm.deletioninprogress = 0
-                            GROUP BY cm.course";
-        $total_acts_rows = $DB->get_records_sql($sql_total_acts);
+        $courseids = array_keys($enrol_rows);
 
-        // Count completed activities per user per course (for enrolled users only)
-        $sql_done_acts = "SELECT " . $DB->sql_concat('cmc.userid', "'_'", 'cm.course') . " AS rk,
-                                  cmc.userid, cm.course AS courseid,
-                                  COUNT(cmc.id) AS done_acts
-                           FROM {course_modules_completion} cmc
-                           JOIN {course_modules} cm ON cm.id = cmc.coursemoduleid
-                                AND cm.completion > 0 AND cm.deletioninprogress = 0
-                           JOIN {local_learnpath_group_courses} lgc ON lgc.courseid = cm.course
-                           JOIN {enrol} e ON e.courseid = cm.course
-                           JOIN {user_enrolments} ue ON ue.enrolid = e.id AND ue.userid = cmc.userid
-                           WHERE cmc.completionstate IN (1, 2)
-                           GROUP BY cmc.userid, cm.course";
-        $done_acts_rows = $DB->get_records_sql($sql_done_acts);
+        // Step 2: count learners who have completed each course — mirrors
+        // Moodle's own completion criteria when configured, falling back to
+        // completion-tracked activities otherwise (see
+        // get_completion_totals_bulk()/get_completion_done_bulk()). Matches
+        // what courseinsights.php shows.
+        list($peins, $peps) = $DB->get_in_or_equal($courseids, SQL_PARAMS_NAMED, 'pce');
+        $enrolled_uids = $DB->get_fieldset_sql(
+            "SELECT DISTINCT ue.userid
+             FROM {enrol} e
+             JOIN {user_enrolments} ue ON ue.enrolid = e.id
+             JOIN {user} u ON u.id = ue.userid AND u.deleted = 0
+             WHERE e.courseid $peins",
+            $peps
+        );
+
+        $totals_map = [];
+        $done_map   = [];
+        try {
+            $totals_map = self::get_completion_totals_bulk($courseids);
+            $done_map   = !empty($enrolled_uids)
+                ? self::get_completion_done_bulk($courseids, $enrolled_uids, $totals_map)
+                : [];
+        } catch (\Throwable $e) {
+            \debugging('LearnTrack get_popular_courses(): completion calc failed: '
+                . $e->getMessage(), DEBUG_DEVELOPER);
+        }
+
+        // Invert to [courseid][userid] = done count for the per-course loop below.
+        $done_idx = [];
+        foreach ($done_map as $uid => $bycourse) {
+            foreach ($bycourse as $cid => $cnt) {
+                $done_idx[$cid][$uid] = $cnt;
+            }
+        }
 
         // Also get course_completions as an authoritative completion signal
+        // (catches courses completed via a criteria type unrelated to activities).
         $sql_cc = "SELECT cc.course AS courseid, cc.userid
                     FROM {course_completions} cc
                     JOIN {enrol} e ON e.courseid = cc.course
@@ -781,19 +929,12 @@ class helper {
         $cc_set  = [];
         foreach ($cc_rows as $ccr) { $cc_set[$ccr->courseid][$ccr->userid] = true; }
 
-        // Build done-acts index: [courseid][userid] = done_acts
-        $done_idx = [];
-        foreach ($done_acts_rows as $dar) { $done_idx[$dar->courseid][$dar->userid] = (int)$dar->done_acts; }
-
-        // For each course: count users who completed all activities OR have course_completion record
+        // For each course: count users who met the "must-do" total OR have a
+        // formal course_completions record.
         $compl_rows = [];
-        foreach ($total_acts_rows as $tar) {
-            $cid   = $tar->courseid;
-            $total = (int)$tar->total_acts;
+        foreach ($courseids as $cid) {
+            $total = $totals_map[$cid]['total'] ?? 0;
             $count = 0;
-            // Get enrolled users for this course
-            $enrolled_uids = isset($enrol_rows[$cid]) ? [] : [];
-            // count from done_idx + cc_set
             $all_users = array_unique(array_merge(
                 array_keys($done_idx[$cid] ?? []),
                 array_keys($cc_set[$cid]  ?? [])
@@ -811,7 +952,6 @@ class helper {
         }
 
         // Step 3: get course names
-        $courseids = array_keys($enrol_rows);
         list($insql, $params) = $DB->get_in_or_equal($courseids, SQL_PARAMS_NAMED, 'pc');
         $courses_info = $DB->get_records_sql(
             "SELECT id, fullname, shortname FROM {course} WHERE id {$insql}",
@@ -993,18 +1133,25 @@ class helper {
         global $DB;
         $courses = $DB->get_records('local_learnpath_group_courses', ['groupid' => $groupid]);
         if (empty($courses)) return 0;
+
+        $courseids = array_values(array_map(fn($lgc) => (int)$lgc->courseid, $courses));
+        // "Must-do" totals/done — mirrors Moodle's own completion criteria when
+        // configured, falling back to completion-tracked activities otherwise.
+        $totals_map = [];
+        $done_map   = [];
+        try {
+            $totals_map = self::get_completion_totals_bulk($courseids);
+            $done_map   = self::get_completion_done_bulk($courseids, [$userid], $totals_map);
+        } catch (\Throwable $e) {
+            \debugging('LearnTrack get_engagement_score(): completion calc failed for '
+                . "group={$groupid} user={$userid}: " . $e->getMessage(), DEBUG_DEVELOPER);
+        }
+
         $progress_total = 0; $act_total = 0; $act_done = 0;
         $grade_sum = 0; $grade_count = 0;
-        foreach ($courses as $lgc) {
-            $cid = $lgc->courseid;
-            $total_acts = (int)$DB->count_records_sql(
-                "SELECT COUNT(id) FROM {course_modules} WHERE course=:cid AND completion>0 AND deletioninprogress=0",
-                ['cid' => $cid]);
-            $done_acts = (int)$DB->count_records_sql(
-                "SELECT COUNT(cmc.id) FROM {course_modules_completion} cmc
-                 JOIN {course_modules} cm ON cm.id=cmc.coursemoduleid AND cm.course=:cid AND cm.completion>0
-                 WHERE cmc.userid=:uid AND cmc.completionstate IN (1,2)",
-                ['cid' => $cid, 'uid' => $userid]);
+        foreach ($courseids as $cid) {
+            $total_acts = $totals_map[$cid]['total'] ?? 0;
+            $done_acts  = $done_map[$userid][$cid] ?? 0;
             $act_total    += $total_acts;
             $act_done     += $done_acts;
             $progress_total += $total_acts > 0 ? ($done_acts / $total_acts * 100) : 0;

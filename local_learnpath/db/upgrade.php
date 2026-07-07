@@ -992,5 +992,72 @@ function xmldb_local_learnpath_upgrade(int $oldversion): bool {
         upgrade_plugin_savepoint(true, 2026050135, 'local', 'learnpath');
     }
 
+    if ($oldversion < 2026050136) {
+        // v1.0.0 (2026050136): Completion tracker now mirrors Moodle's own numbers.
+        //
+        // ROOT CAUSE: every "percent complete" / "total activities" calculation
+        // in this plugin counted ALL course_modules with completion tracking
+        // enabled as the denominator. Moodle's own Course Completion report
+        // instead divides by course_completion_criteria — the specific
+        // conditions a teacher actually configured (which can be a SUBSET of
+        // completion-tracked activities, or a grade/self/date criterion). A
+        // course can have more tracked activities than are actually required,
+        // so LearnTrack's numbers diverged from Moodle's in both directions.
+        //
+        // FIX: two new shared functions in classes/data/helper.php —
+        // get_completion_totals_bulk() and get_completion_done_bulk() — read
+        // course_completion_criteria / course_completion_crit_compl (exactly
+        // what Moodle's own report uses) when a course has criteria
+        // configured, falling back to the old completion-tracked-activities
+        // count only for courses with no criteria configured at all. All eight
+        // places in the plugin that independently duplicated the old
+        // calculation (get_course_progress, get_progress_detail,
+        // get_user_path_progress fallback, get_popular_courses,
+        // get_engagement_score, index.php's Comparison view, courseinsights.php,
+        // export\manager::export_course) now call these two shared functions
+        // instead of their own copy.
+        //
+        // Also added in this version (welcome.php): a "Run Now" button per
+        // scheduled task under Cron & Delivery Health, for sites where site
+        // cron has never executed — runs the task in the background via
+        // fetch() without blocking the page, gated to moodle/site:config.
+        //
+        // No DB schema changes.
+        upgrade_plugin_savepoint(true, 2026050136, 'local', 'learnpath');
+    }
+
+    if ($oldversion < 2026050137) {
+        // v1.0.0 (2026050137): Reliability fix — completion calc can no longer
+        // crash a cron task.
+        //
+        // ROOT CAUSE: after 2026050136 shipped, real site cron started actually
+        // executing (separately fixed elsewhere) and began hitting the new
+        // completion-criteria queries (course_completion_criteria /
+        // course_completion_crit_compl) added in that version. Those queries
+        // were only defensively try/catch'd at the point where they run inside
+        // helper.php's two shared functions — but every CALLER of those
+        // functions (get_course_progress, get_progress_detail, and the other
+        // duplicate call sites) had no protection of its own, so any
+        // unexpected failure (schema variance, bad data, etc.) propagated all
+        // the way out of the scheduled task's execute() and got marked
+        // "Failing" by Moodle's cron runner with escalating retry delay.
+        //
+        // FIX: every call site of the completion-calculation functions
+        // (helper.php's get_course_progress/get_progress_detail/
+        // get_user_path_progress/get_popular_courses/get_engagement_score,
+        // plus index.php, courseinsights.php, and export\manager::export_course)
+        // now wraps the call in try/catch, degrading to 0/0 for that
+        // row/course on any failure and logging via debugging() instead of
+        // ever crashing the calling task or page.
+        //
+        // Also fixed: the "Run Now" status badge on welcome.php now re-reads
+        // task_scheduled after running and updates in place, instead of
+        // leaving a stale "Failing" badge on screen after a successful manual
+        // run (cosmetic — the underlying data was always correct).
+        //
+        // No DB schema changes.
+        upgrade_plugin_savepoint(true, 2026050137, 'local', 'learnpath');
+    }
+
     return true;
 }

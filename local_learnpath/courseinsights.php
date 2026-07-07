@@ -181,41 +181,36 @@ try {
     }
 } catch (\Throwable $e) { /* grade not set up */ }
 
-// Module completion counts (one query for all users)
-$total_mods = (int)$DB->count_records_sql(
-    "SELECT COUNT(id) FROM {course_modules}
-     WHERE course=:cid AND completion>0 AND deletioninprogress=0",
-    ['cid'=>$courseid]
-);
-$mod_comp_counts = [];
-if ($total_mods > 0) {
-    // Apply date filter to module completions so chart updates with period selection
-    $mod_date_where  = '';
-    $mod_date_params = ['cid' => $courseid];
-    if ($from_ts > 0) {
-        $mod_date_where = ' AND cmc.timemodified >= :mfrom AND cmc.timemodified <= :mto';
-        $mod_date_params['mfrom'] = $from_ts;
-        $mod_date_params['mto']   = $to_ts;
-    }
-    $rows = $DB->get_records_sql(
-        "SELECT cmc.userid, COUNT(cmc.id) AS done
-         FROM {course_modules_completion} cmc
-         JOIN {course_modules} cm ON cm.id=cmc.coursemoduleid
-         WHERE cm.course=:cid AND cmc.completionstate IN (1,2)
-           AND cm.deletioninprogress=0{$mod_date_where}
-         GROUP BY cmc.userid",
-        $mod_date_params
-    );
-    foreach ($rows as $r) { $mod_comp_counts[$r->userid] = (int)$r->done; }
-}
-
-// Progress distribution
+// Progress distribution — enrolled users
 $enrolled_uids = $DB->get_records_sql(
     "SELECT DISTINCT u.id AS userid FROM {user_enrolments} ue
      JOIN {enrol} e ON e.id=ue.enrolid AND e.courseid=:cid
      JOIN {user} u ON u.id=ue.userid AND u.deleted=0",
     ['cid'=>$courseid]
 );
+
+// "Must-do" totals/done — mirrors Moodle's own completion criteria when
+// configured, falling back to completion-tracked activities otherwise (see
+// helper::get_completion_totals_bulk()/get_completion_done_bulk()).
+$total_mods      = 0;
+$mod_comp_counts = [];
+try {
+    $ci_totals_map = \local_learnpath\data\helper::get_completion_totals_bulk([$courseid]);
+    $total_mods    = $ci_totals_map[$courseid]['total'] ?? 0;
+    if ($total_mods > 0 && !empty($enrolled_uids)) {
+        // Date filter (period selection) applies to whichever source is in use —
+        // course_completion_crit_compl.timecompleted or cmc.timemodified.
+        $ci_done_map = \local_learnpath\data\helper::get_completion_done_bulk(
+            [$courseid], array_keys($enrolled_uids), $ci_totals_map, $from_ts, $to_ts
+        );
+        foreach ($ci_done_map as $uid => $bycourse) {
+            $mod_comp_counts[$uid] = $bycourse[$courseid] ?? 0;
+        }
+    }
+} catch (\Throwable $e) {
+    debugging('LearnTrack courseinsights: completion calc failed: ' . $e->getMessage(), DEBUG_DEVELOPER);
+}
+
 $buckets = ['0'=>0,'1_25'=>0,'26_50'=>0,'51_75'=>0,'76_99'=>0,'100'=>0];
 foreach ($enrolled_uids as $eu) {
     $uid = $eu->userid;
