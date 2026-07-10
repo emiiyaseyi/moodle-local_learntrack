@@ -28,6 +28,34 @@ class helper {
         return self::$tbl_cache[$table];
     }
 
+    // ── ENROLMENT ────────────────────────────────────────────────────────────
+
+    private static ?int $studentroleid = null;
+
+    /**
+     * Resolve Moodle's "Student" role id for manual enrolment.
+     *
+     * Matched by archetype ('student'), not shortname, so this still finds
+     * the right role on sites that have renamed it (e.g. "Learner"). Enrolling
+     * a user via enrol_plugin::enrol_user() without a roleid creates the
+     * enrolment but assigns NO role at all — this is what every manual-enrol
+     * call site in this plugin should pass as the third argument.
+     */
+    public static function get_student_roleid(): int {
+        global $DB;
+        if (self::$studentroleid !== null) {
+            return self::$studentroleid;
+        }
+        $roles = \get_archetype_roles('student');
+        if (!empty($roles)) {
+            self::$studentroleid = (int)reset($roles)->id;
+        } else {
+            $row = $DB->get_record('role', ['shortname' => 'student']);
+            self::$studentroleid = $row ? (int)$row->id : 5;
+        }
+        return self::$studentroleid;
+    }
+
     // ── GROUPS ────────────────────────────────────────────────────────────────
 
     public static function get_groups(int $userid = 0): array {

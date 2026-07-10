@@ -94,14 +94,19 @@ if ($isadmin && $groupid > 0 && optional_param('enroll_user', 0, PARAM_INT) > 0 
     $enroll_course = optional_param('enroll_course', 0, PARAM_INT); // 0 = all, >0 = single course
     $enrolled_count = 0;
 
+    $lt_studentroleid = \local_learnpath\data\helper::get_student_roleid();
+
     if ($enroll_course > 0) {
-        // Single course enrolment (from Comparison / Per Course NE badge)
+        // Single course enrolment (from Comparison / Per Course NE badge).
+        // Re-runs enrol_user() (safe/idempotent) whenever the student role is
+        // missing, even if the user_enrolments row already exists — this is
+        // what actually repairs a learner who got enrolled without a role.
         $ctx_c = context_course::instance($enroll_course, IGNORE_MISSING);
-        if ($ctx_c && !is_enrolled($ctx_c, $enroll_uid)) {
+        if ($ctx_c && !user_has_role_assignment($enroll_uid, $lt_studentroleid, $ctx_c->id)) {
             $instance = $DB->get_record('enrol', ['courseid' => $enroll_course, 'enrol' => 'manual']);
             $plugin   = enrol_get_plugin('manual');
             if ($plugin && $instance) {
-                $plugin->enrol_user($instance, $enroll_uid);
+                $plugin->enrol_user($instance, $enroll_uid, $lt_studentroleid);
                 $enrolled_count = 1;
             }
         }
@@ -110,11 +115,11 @@ if ($isadmin && $groupid > 0 && optional_param('enroll_user', 0, PARAM_INT) > 0 
         $courses = $DB->get_records('local_learnpath_group_courses', ['groupid' => $groupid]);
         foreach ($courses as $lgc) {
             $ctx_c = context_course::instance($lgc->courseid, IGNORE_MISSING);
-            if (!$ctx_c || is_enrolled($ctx_c, $enroll_uid)) { continue; }
+            if (!$ctx_c || user_has_role_assignment($enroll_uid, $lt_studentroleid, $ctx_c->id)) { continue; }
             $instance = $DB->get_record('enrol', ['courseid' => $lgc->courseid, 'enrol' => 'manual']);
             $plugin   = enrol_get_plugin('manual');
             if ($plugin && $instance) {
-                $plugin->enrol_user($instance, $enroll_uid);
+                $plugin->enrol_user($instance, $enroll_uid, $lt_studentroleid);
                 $enrolled_count++;
             }
         }
@@ -170,14 +175,18 @@ if ($isadmin && $groupid > 0 && optional_param('bulk_enroll', 0, PARAM_INT) > 0 
     $uids_raw = optional_param('userids', '', PARAM_TEXT);
     $uid_list = array_filter(array_map('intval', explode(',', $uids_raw)));
     $total_enrolled = 0;
+    $lt_bulk_roleid = \local_learnpath\data\helper::get_student_roleid();
     foreach ($uid_list as $bulk_uid) {
         $courses = $DB->get_records('local_learnpath_group_courses', ['groupid' => $groupid]);
         foreach ($courses as $lgc) {
             $ctx_c = context_course::instance($lgc->courseid, IGNORE_MISSING);
-            if (!$ctx_c || is_enrolled($ctx_c, $bulk_uid)) continue;
+            if (!$ctx_c || user_has_role_assignment($bulk_uid, $lt_bulk_roleid, $ctx_c->id)) continue;
             $instance = $DB->get_record('enrol', ['courseid' => $lgc->courseid, 'enrol' => 'manual']);
             $plugin   = enrol_get_plugin('manual');
-            if ($plugin && $instance) { $plugin->enrol_user($instance, $bulk_uid); $total_enrolled++; }
+            if ($plugin && $instance) {
+                $plugin->enrol_user($instance, $bulk_uid, $lt_bulk_roleid);
+                $total_enrolled++;
+            }
         }
     }
     redirect(

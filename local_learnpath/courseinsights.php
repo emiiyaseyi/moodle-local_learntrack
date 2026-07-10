@@ -37,8 +37,9 @@ if ($courseid > 0 && has_capability('local/learnpath:manage', context_system::in
     $enrol_inst   = $DB->get_record('enrol', ['courseid'=>$courseid,'enrol'=>'manual']);
     if ($enrol_plugin && $enrol_inst) {
         $ctx_c = context_course::instance($courseid, IGNORE_MISSING);
-        if ($ctx_c && !is_enrolled($ctx_c, $enrol_uid)) {
-            $enrol_plugin->enrol_user($enrol_inst, $enrol_uid);
+        $lt_roleid = DH::get_student_roleid();
+        if ($ctx_c && !user_has_role_assignment($enrol_uid, $lt_roleid, $ctx_c->id)) {
+            $enrol_plugin->enrol_user($enrol_inst, $enrol_uid, $lt_roleid);
         }
     }
     redirect(new moodle_url('/local/learnpath/courseinsights.php',

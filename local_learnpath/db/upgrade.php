@@ -1084,5 +1084,36 @@ function xmldb_local_learnpath_upgrade(int $oldversion): bool {
         upgrade_plugin_savepoint(true, 2026050138, 'local', 'learnpath');
     }
 
+    if ($oldversion < 2026050139) {
+        // v1.0.0 (2026050139): Fix — dashboard "Enrol" actions created the
+        // course enrolment but assigned NO role.
+        //
+        // ROOT CAUSE: every call to enrol_plugin::enrol_user() in this plugin
+        // (index.php's single/all-course/bulk enrol actions, and
+        // courseinsights.php's per-course enrol action) omitted the $roleid
+        // argument. Moodle creates the user_enrolments row either way, but
+        // without a roleid it never calls role_assign() — so the learner was
+        // enrolled with no role at all and effectively had no access.
+        //
+        // FIX: added data\helper::get_student_roleid(), which resolves the
+        // Student role by archetype (works even if the role's been renamed),
+        // and every enrol_user() call now passes it explicitly.
+        //
+        // Also fixed: the "already enrolled, skip" guard at each call site
+        // checked is_enrolled() (enrolment existence) instead of role
+        // presence — meaning a learner already enrolled without a role could
+        // never be fixed by clicking "Enrol" again, since the guard treated
+        // them as already done. The guard now checks
+        // user_has_role_assignment() instead, so re-clicking "Enrol" on an
+        // already-affected learner repairs their missing role (enrol_user()
+        // is safe/idempotent to call again — it just calls role_assign(),
+        // which is itself a no-op if the role is already there).
+        //
+        // No DB schema changes. Existing learners enrolled without a role
+        // need one "Enrol" click each to repair — this fix does not
+        // retroactively fix them on upgrade.
+        upgrade_plugin_savepoint(true, 2026050139, 'local', 'learnpath');
+    }
+
     return true;
 }

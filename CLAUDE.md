@@ -379,6 +379,52 @@ running exposed a code path that manual single-click testing (which always hit t
 
 ---
 
+## 7. Fix: "Enrol" gave learners no role at all
+
+### Problem reported
+Clicking "Enrol" for a learner (single course, all-courses, bulk, or from Course
+Insights) did create the enrolment, but the learner ended up with **no role** —
+effectively no access, since Moodle access control is role-based.
+
+### Root cause
+Every call to `enrol_plugin::enrol_user()` in the plugin (index.php's single-course,
+all-courses, and bulk enrol actions; courseinsights.php's per-course enrol action)
+omitted the `$roleid` argument. Moodle happily creates the `user_enrolments` row
+either way, but without a `roleid` it never calls `role_assign()` — so the learner
+was enrolled with nothing to actually grant them course access.
+
+Compounding it: each call site's "already enrolled, skip" guard checked
+`is_enrolled()` (does an enrolment row exist), not whether a role was assigned. So a
+learner already stuck in the broken (enrolled, roleless) state could never be
+repaired just by clicking "Enrol" again — the guard saw them as "already done" and
+skipped straight past.
+
+### Changes made
+
+**`local_learnpath/classes/data/helper.php`**
+- Added `get_student_roleid()` — resolves Moodle's Student role by **archetype**
+  (`get_archetype_roles('student')`), not shortname, so it still finds the right role
+  even on sites that renamed it (e.g. to "Learner"). Falls back to shortname lookup,
+  then role id `5`, if archetype lookup somehow returns nothing.
+
+**`local_learnpath/index.php`** (single-course, all-courses, and bulk enrol actions)
+**`local_learnpath/courseinsights.php`** (per-course enrol action)
+- Every `enrol_user()` call now passes `get_student_roleid()` explicitly.
+- Every "skip if already handled" guard now checks
+  `user_has_role_assignment($userid, $roleid, $contextid)` instead of `is_enrolled()`.
+  This means clicking "Enrol" on a learner who's already enrolled-but-roleless now
+  actually repairs them — `enrol_user()` is safe to call again on an existing
+  enrolment (it just calls `role_assign()`, itself a no-op if the role's already
+  there), so re-enrolling is exactly the repair mechanism.
+
+**`local_learnpath/db/upgrade.php`** (new savepoint `2026050139`)
+- Documents the fix. No schema changes, and **no automatic data migration** —
+  existing learners already stuck without a role need one "Enrol" (or bulk-enrol)
+  click each to repair; this was left as a deliberate manual action rather than a
+  silent site-wide role change.
+
+---
+
 ## Version history
 
 | Version | Change |
@@ -388,6 +434,7 @@ running exposed a code path that manual single-click testing (which always hit t
 | `2026050136` | Manual "Run Now" button for scheduled tasks; completion tracker rewritten to mirror Moodle's own criteria-based numbers |
 | `2026050137` | Reliability fix — completion calc can no longer crash a cron task; Run Now status badge refreshes correctly |
 | `2026050138` | Reliability fix — per-reminder/per-schedule processing can no longer crash send_reminders/send_scheduled_reports |
+| `2026050139` | Fix — "Enrol" actions now assign the Student role, and can repair already-broken (roleless) enrolments |
 
 ## Post-deploy checklist
 1. Run the site upgrade (Site Administration → Notifications) to apply the savepoints.
@@ -406,3 +453,6 @@ running exposed a code path that manual single-click testing (which always hit t
    these were the two showing "Failing" and were never manually exercised before this
    fix. If either still reports an error message, that pinpoints the exact remaining
    bug to fix next.
+8. For learners already stuck enrolled-without-a-role: click "Enrol" (or use bulk
+   enrol/"Enrol Selected") for them again — confirm they now show up with the Student
+   role in the course's enrolled-users list, not just an enrolment record.
